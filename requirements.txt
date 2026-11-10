@@ -6,4 +6,3 @@ requests
 python-dotenv
 t-tech-investments
 streamlit-autorefresh
-grpcio==1.73.1
