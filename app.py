@@ -32,7 +32,7 @@ if 'tg_status' not in st.session_state:
 # Асинхронная отправка, чтобы робот никогда не зависал
 def send_tg_alert_worker(text):
     # !!! СЮДА НАДО ВСТАВИТЬ НАСТОЯЩИЙ ТОКЕН ИЗ BOTFATHER (МНОГО ЦИФР И БУКВ) !!!
-    token = "mtbn_bot"
+    token = "9201215509:AAEN-CbKpi9jHRa-t7qrTzakvpfaRQninnc"
     chat_id = "166589831"
     
     safe_text = urllib.parse.quote(text)
