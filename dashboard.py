@@ -34,6 +34,7 @@ st_autorefresh(interval=15000, key="data_refresh")
 
 nlp = MLNoiseFilter()
 
+# Инициализация состояний
 if "logs" not in st.session_state:
     st.session_state.logs = []
 if "last_traded_candle" not in st.session_state:
@@ -206,6 +207,7 @@ if not df.empty and len(df) >= 20:
         st.divider()
         autopilot = st.toggle("🤖 АВТОПИЛОТ", value=False)
         
+        # Логика автопилота
         if autopilot and figi and acc_id:
             if st.session_state.last_traded_candle == last_candle_time:
                 st.info("⏳ Ожидание следующей свечи (сделка по этой уже совершена)")
@@ -218,9 +220,10 @@ if not df.empty and len(df) >= 20:
                         try:
                             with Client(TOKEN, target=INVEST_GRPC_API_SANDBOX) as client:
                                 price, qty, status = place_order(client, figi, acc_id, OrderDirection.ORDER_DIRECTION_BUY, qty_lots=1)
+                            
                             if status == "FILLED":
-                                send_tg_alert(f"🤖 КУПИЛ 1 лот по {price:.2f}")
-                                add_log(f"✅ КУПИЛ 1 лот по {price:.2f}")
+                                send_tg_alert(f"🤖 КУПИЛ {qty} лот(а) по {price:.2f}")
+                                add_log(f"✅ КУПИЛ {qty} лот(а) по {price:.2f}")
                             else:
                                 add_log(f"⚠️ Заявка на покупку: {status}")
                             st.session_state.last_traded_candle = last_candle_time
@@ -230,20 +233,66 @@ if not df.empty and len(df) >= 20:
                             add_log(f"❌ Ошибка: {e}")
                         
                 elif signal == "SELL" and shares_count > 0:
+                    # ИСПРАВЛЕНО: Продаем ВЕСЬ объем при сигнале SELL
+                    lots_to_sell = shares_count // lot_size
+                    if lots_to_sell > 0:
+                        try:
+                            with Client(TOKEN, target=INVEST_GRPC_API_SANDBOX) as client:
+                                price, qty, status = place_order(client, figi, acc_id, OrderDirection.ORDER_DIRECTION_SELL, qty_lots=lots_to_sell)
+                            
+                            if status == "FILLED":
+                                msg = f"ПРОДАЛ {qty} лотов по {price:.2f}"
+                                send_tg_alert(f"🤖 {msg}")
+                                add_log(f"✅ {msg}")
+                            else:
+                                add_log(f"⚠️ Заявка на продажу: {status}")
+                            st.session_state.last_traded_candle = last_candle_time
+                            st.cache_data.clear()
+                            st.rerun()
+                        except Exception as e:
+                            add_log(f"❌ Ошибка: {e}")
+
+        st.divider()
+        st.subheader("Ручная торговля")
+        
+        if not figi or not acc_id:
+            st.error("❌ Нет данных: проверь создан ли счет.")
+        else:
+            col1, col2 = st.columns(2)
+            if col1.button("🟢 КУПИТЬ", key="buy_btn"):
+                try:
+                    with Client(TOKEN, target=INVEST_GRPC_API_SANDBOX) as client:
+                        price, qty, status = place_order(client, figi, acc_id, OrderDirection.ORDER_DIRECTION_BUY, qty_lots=1)
+                    if status == "FILLED":
+                        send_tg_alert(f"🛒 ПОКУПКА {qty} лота по {price:.2f}")
+                        add_log(f"🛒 Куплено {qty} лота по {price:.2f}")
+                    else:
+                        add_log(f"⚠️ Ручная покупка: {status}")
+                    st.cache_data.clear()
+                    st.rerun()
+                except Exception as e:
+                    add_log(f"❌ Ошибка: {e}")
+            
+            if col2.button("🔴 ПРОДАТЬ", key="sell_btn"):
+                # ИСПРАВЛЕНО: Ручная продажа тоже продает всё
+                lots_to_sell = shares_count // lot_size
+                if lots_to_sell > 0:
                     try:
                         with Client(TOKEN, target=INVEST_GRPC_API_SANDBOX) as client:
-                            price, qty, status = place_order(client, figi, acc_id, OrderDirection.ORDER_DIRECTION_SELL, qty_lots=1)
+                            price, qty, status = place_order(client, figi, acc_id, OrderDirection.ORDER_DIRECTION_SELL, qty_lots=lots_to_sell)
                         if status == "FILLED":
-                            send_tg_alert(f"🤖 ПРОДАЛ 1 лот по {price:.2f}")
-                            add_log(f"✅ ПРОДАЛ 1 лот по {price:.2f}")
+                            send_tg_alert(f"💸 ПРОДАЖА {qty} лотов по {price:.2f}")
+                            add_log(f"💸 Продано {qty} лотов по {price:.2f}")
                         else:
-                            add_log(f"⚠️ Заявка на продажу: {status}")
-                        st.session_state.last_traded_candle = last_candle_time
+                            add_log(f"⚠️ Ручная продажа: {status}")
                         st.cache_data.clear()
                         st.rerun()
                     except Exception as e:
                         add_log(f"❌ Ошибка: {e}")
+                else:
+                    st.warning("Нет акций для продажи.")
 
+    # ГРАФИК
     fig = go.Figure()
     fig.add_trace(go.Candlestick(x=df['time'], open=df['open'], high=df['high'], low=df['low'], close=df['close'], increasing_line_color='#26a69a', decreasing_line_color='#ef5350', increasing_fillcolor='rgba(0,0,0,0)', decreasing_fillcolor='rgba(0,0,0,0)', name='Цена'))
     fig.add_trace(go.Scatter(x=df['time'], y=df['mean'], line=dict(color='#FFD700', width=1.5), name='MA20'))
