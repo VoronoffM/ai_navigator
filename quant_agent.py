@@ -1,33 +1,35 @@
-# Терминал: touch quant_agent.py && open -e quant_agent.py
 import pandas as pd
 
 class QuantAgent:
-    """Агент математики. Считает Z-Score, средние и полосы."""
+    """
+    Агент математического анализа.
+    Отвечает за расчет индикаторов (Z-Score, Bollinger Bands).
+    """
     def __init__(self, window=20):
         self.window = window
 
     def calculate_metrics(self, df):
-        # Если данных меньше окна - вернуть как есть
+        """Считает скользящую среднюю, стандартное отклонение и Z-Score."""
         if len(df) < self.window:
             return df
         
-        # Скользящая средняя за 20 часов
+        # MA20 (Средняя за 20 часов)
         df['mean'] = df['close'].rolling(window=self.window).mean()
         # Стандартное отклонение
         df['std'] = df['close'].rolling(window=self.window).std()
-        # Z-Score: на сколько сигм текущая цена отклонилась от среднего
+        # Z-Score: на сколько сигм текущая цена отклонилась от средней
         df['z_score'] = (df['close'] - df['mean']) / df['std']
-        # Полосы Боллинджера для визуализации
+        # Границы Боллинджера (для визуализации)
         df['upper_band'] = df['mean'] + (1.5 * df['std'])
         df['lower_band'] = df['mean'] - (1.5 * df['std'])
         return df
 
     def get_signal(self, z_score):
-        # Вердикт робота на основе Z-Score
+        """Возвращает торговый сигнал на основе Z-Score."""
         if pd.isna(z_score):
             return "HOLD"
         if z_score <= -1.5:
-            return "BUY"   # Цена сильно упала (перепроданность)
+            return "BUY"   # Перепроданность (аномально низкая цена)
         elif z_score >= 1.5:
-            return "SELL"  # Цена сильно выросла (перекупленность)
+            return "SELL"  # Перекупленность (аномально высокая цена)
         return "HOLD"

@@ -1,23 +1,82 @@
-# Терминал: touch nlp_agent.py && open -e nlp_agent.py
+import warnings
+import ollama
+import outlines
+from typing import Literal
+from pydantic import BaseModel, Field
+from langchain_community.vectorstores import Chroma
+from langchain_ollama import OllamaEmbeddings
+
+warnings.filterwarnings("ignore")
+
+# Схемы для Outlines (гарантия строгого JSON)
+class EventClassification(BaseModel):
+    type: Literal["FACT", "RUMOR"] = Field(description="FACT = факт. RUMOR = слух/паника.")
+
+class TradeDecision(BaseModel):
+    action: Literal["BLOCK", "ALLOW"] = Field(description="BLOCK = запрет. ALLOW = разрешение.")
+    reason: str = Field(description="Краткое объяснение на русском.")
+
 class NLPAgent:
-    """Агент анализа новостей. Сейчас на ключевых словах (заглушка для AI)."""
+    """
+    Гибридный агент анализа новостей (Hard Rules + RAG + Qwen 2.5).
+    """
     def __init__(self):
-        # Слова, которые означают реальный крах компании
-        self.fundamental_keywords = ["дефолт", "санкции", "отмена дивидендов", "банкротство", "арест"]
-        # Слова, которые означают эмоциональную панику
-        self.panic_keywords = ["паника", "слив", "обвал", "маржин колл"]
+        self.fatal_keywords = ["дефолт", "банкротство", "остановка торгов", "технический сбой"]
+        self.panic_keywords = ["паника", "слив", "обвал", "ужас", "страшно"]
+        
+        try:
+            self.knowledge_base = [
+                "Газпром объявил дефолт по облигациям.",
+                "Сбербанк попал под блокирующие санкции США.",
+                "Лукойл отменил выплату дивидендов."
+            ]
+            self.embeddings = OllamaEmbeddings(model="nomic-embed-text")
+            self.vectorstore = Chroma.from_texts(texts=self.knowledge_base, embedding=self.embeddings)
+            self.retriever = self.vectorstore.as_retriever(search_kwargs={"k": 1})
+            
+            self.ollama_client = ollama.Client()
+            self.model = outlines.from_ollama(self.ollama_client, "qwen2.5:3b")
+            self.is_llm_ready = True
+        except Exception as e:
+            print(f"⚠️ LLM offline: {e}")
+            self.is_llm_ready = False
 
     def analyze_news(self, text):
         text_lower = text.lower()
         
-        # 1. Проверяем на реальный негатив
-        for word in self.fundamental_keywords:
+        # УРОВЕНЬ 1: Мгновенная проверка на смертельные угрозы
+        for word in self.fatal_keywords:
             if word in text_lower:
-                return {"allow_trade": False, "reason": f"Фундаментальная угроза: {word}"}
+                return {"allow_trade": False, "reason": f"Hard Rule: {word}"}
                 
-        # 2. Если паника - это хороший вход (отскок)
+        # УРОВЕНЬ 2: Мгновенная проверка на панику (разрешаем, экономим время LLM)
         for word in self.panic_keywords:
             if word in text_lower:
-                return {"allow_trade": True, "reason": "Паника толпы (ложное падение)"}
+                return {"allow_trade": True, "reason": "Hard Rule: Паника толпы"}
+
+        # УРОВЕНЬ 3: Если не сработали жесткие правила - спрашиваем Qwen
+        if not self.is_llm_ready:
+            return {"allow_trade": True, "reason": "Нейтральный фон (LLM offline)"}
+
+        try:
+            prompt_cls = f"Прочитай новость. Это факт или слух? Новость: {text}"
+            cls_raw = self.model(prompt_cls, EventClassification)
+            cls_res = EventClassification.model_validate_json(cls_raw)
+            
+            if cls_res.type == "RUMOR":
+                return {"allow_trade": True, "reason": "LLM: Слух/Паника"}
                 
-        return {"allow_trade": True, "reason": "Нейтральный фон"}
+            context_docs = self.retriever.invoke(text)
+            context = "\n".join([doc.page_content for doc in context_docs])
+            
+            prompt_dec = f"Оцени риск. Контекст: {context}. Новость: {text}"
+            dec_raw = self.model(prompt_dec, TradeDecision)
+            dec_res = TradeDecision.model_validate_json(dec_raw)
+            
+            if dec_res.action == "BLOCK":
+                return {"allow_trade": False, "reason": f"LLM: {dec_res.reason}"}
+            else:
+                return {"allow_trade": True, "reason": f"LLM: {dec_res.reason}"}
+
+        except Exception as e:
+            return {"allow_trade": True, "reason": f"Нейтральный фон (LLM error: {e})"}

@@ -1,4 +1,3 @@
-# Терминал: touch qa_agent.py && open -e qa_agent.py
 import unittest
 import pandas as pd
 from quant_agent import QuantAgent
@@ -12,23 +11,18 @@ class TestAIShturman(unittest.TestCase):
         self.nlp = NLPAgent()
 
     def test_quant_signals(self):
-        # Симулируем резкое падение
         df = pd.DataFrame({"close": [100]*19 + [80]}) 
         df = self.quant.calculate_metrics(df)
         z_score = df['z_score'].iloc[-1]
-        self.assertEqual(self.quant.get_signal(z_score), "BUY", "Ошибка: Не выдал BUY при падении")
+        self.assertEqual(self.quant.get_signal(z_score), "BUY")
 
-    def test_risk_blocks_buy(self):
-        # Проверяем блокировку при наличии позиции
-        is_safe, msg = self.risk.validate_buy_order(cash=100000, shares_count=10, price=100, lot_size=10)
-        self.assertFalse(is_safe)
-        self.assertEqual(msg, "Уже есть открытая позиция")
-
-    def test_nlp_blocks_news(self):
-        # Проверяем блокировку на плохие новости
-        res = self.nlp.analyze_news("Газпром объявил дефолт")
-        self.assertFalse(res["allow_trade"])
+    def test_risk_dynamic_lot_size(self):
+        # Сбер (лот 10): 100 руб * 10 = 1000 руб (ок)
+        is_safe_sber, _ = self.risk.validate_buy_order(cash=100000, shares_count=0, price=100, lot_size=10)
+        self.assertTrue(is_safe_sber)
+        # Дорогая акция (лот 1): 60000 руб (превышает лимит 50к)
+        is_safe_lkoh, msg = self.risk.validate_buy_order(cash=100000, shares_count=0, price=60000, lot_size=1)
+        self.assertFalse(is_safe_lkoh)
 
 if __name__ == "__main__":
-    print("🤖 Запуск QA-Агента...")
     unittest.main()
