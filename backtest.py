@@ -35,8 +35,15 @@ def fetch_history_chunked(client, figi, days=90):
         time.sleep(0.3)
     return all_candles
 
-def run_backtest(ticker="GAZP", days=90, use_tp_sl=True):
-    print(f"📥 Загрузка данных {ticker}...")
+def run_backtest(ticker="GAZP", days=90, use_tp_sl=True, tariff="Trader"):
+    print(f"📥 Загрузка данных {ticker} для тарифа {tariff}...")
+    
+    # Выставляем комиссию в зависимости от тарифа
+    if tariff == "Free":
+        commission = 0.003  # 0.3% на бесплатном
+    else:
+        commission = 0.0005 # 0.05% на трейдере
+
     with Client(TOKEN, target=INVEST_GRPC_API_SANDBOX) as client:
         shares = client.instruments.shares()
         figi = next((s.figi for s in shares.instruments if s.ticker == ticker), None)
@@ -49,7 +56,6 @@ def run_backtest(ticker="GAZP", days=90, use_tp_sl=True):
             data.append({"time": c.time, "open": get_price(c.open), "high": get_price(c.high), "low": get_price(c.low), "close": get_price(c.close)})
             
     df = pd.DataFrame(data)
-    print(f"✅ Загружено {len(df)} завершенных свечей.")
     
     window = 20
     df['mean'] = df['close'].rolling(window=window).mean()
@@ -59,16 +65,18 @@ def run_backtest(ticker="GAZP", days=90, use_tp_sl=True):
     balance = 100000.0 
     position = 0 
     completed_trades = 0
-    commission = 0.0005 # 0.05%
     slippage = 0.0002   # 0.02%
     
     equity_curve = [100000.0] 
+    entry_price = 0
+    tp_price = 0
+    sl_price = 0
     
     for i in range(window, len(df) - 1):
         signal_z = df['z_score'].iloc[i]
-        exec_price = df['open'].iloc[i+1] # Исполняем на следующей свече
+        exec_price = df['open'].iloc[i+1] 
         
-        # --- ЛОГИКА ВХОДА ---
+        # --- ВХОД ---
         if signal_z <= -1.5 and position == 0:
             buy_price = exec_price * (1 + slippage) 
             cost = buy_price * 10
@@ -82,31 +90,29 @@ def run_backtest(ticker="GAZP", days=90, use_tp_sl=True):
                     tp_price = entry_price * 1.015 # Тейк +1.5%
                     sl_price = entry_price * 0.992 # Стоп -0.8%
         
-        # --- ЛОГИКА ВЫХОДА ---
+        # --- ВЫХОД ---
         elif position > 0:
             if use_tp_sl:
-                # Проверяем, задел ли High тейк или Low стоп внутри этой свечи
                 high = df['high'].iloc[i+1]
                 low = df['low'].iloc[i+1]
                 
-                exit_reason = None
                 exit_price = 0
+                exit_triggered = False
                 
                 if high >= tp_price:
                     exit_price = tp_price * (1 - slippage)
-                    exit_reason = "TP"
+                    exit_triggered = True
                 elif low <= sl_price:
                     exit_price = sl_price * (1 - slippage)
-                    exit_reason = "SL"
+                    exit_triggered = True
                     
-                if exit_reason:
+                if exit_triggered:
                     revenue = exit_price * position
                     fee = revenue * commission
                     balance += (revenue - fee)
                     position = 0
                     completed_trades += 1
             
-            # Выход по обратному сигналу (если тейк/стоп не сработал)
             elif signal_z >= 1.5:
                 sell_price = exec_price * (1 - slippage)
                 revenue = sell_price * position
@@ -124,14 +130,14 @@ def run_backtest(ticker="GAZP", days=90, use_tp_sl=True):
     max_drawdown = ((eq_series - eq_series.cummax()) / eq_series.cummax()).min() * 100
     
     print("\n" + "="*40)
-    print(f"📊 РЕЗУЛЬТАТ (Стоп/Тейк: {'ВКЛ' if use_tp_sl else 'ВЫКЛ'})")
+    print(f"📊 РЕЗУЛЬТАТ (Тариф: {tariff}, Сделок: {completed_trades})")
     print("="*40)
     print(f"Итоговый капитал:  {final_equity:,.2f} ₽")
     print(f"Доходность:        {total_return:+.2f}%")
-    print(f"Сделок (круг):     {completed_trades}")
     print(f"Макс. просадка:    {max_drawdown:.2f}%")
     print("="*40)
 
 if __name__ == "__main__":
-    run_backtest("GAZP", days=90, use_tp_sl=False)
-    run_backtest("GAZP", days=90, use_tp_sl=True)
+    # Прогоняем только один раз для скорости (без дублей загрузки)
+    run_backtest("GAZP", days=90, use_tp_sl=True, tariff="Free")
+    run_backtest("GAZP", days=90, use_tp_sl=True, tariff="Trader")
