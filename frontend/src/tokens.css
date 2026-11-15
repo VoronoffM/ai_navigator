@@ -1,0 +1,62 @@
+:root {
+  color-scheme: dark;
+  --font-ui: 'Inter Variable', system-ui, sans-serif;
+  font-family: var(--font-ui);
+  font-synthesis: none;
+
+  --text-caption: 0.8125rem;
+  --text-meta: 0.875rem;
+  --text-body: 0.9375rem;
+  --text-emphasis: 1rem;
+  --text-section: 1.125rem;
+  --text-navigator: clamp(1.375rem, 1.8vw, 1.625rem);
+  --text-instrument: clamp(1.875rem, 2.6vw, 2.375rem);
+  --text-price: clamp(2.625rem, 4.4vw, 4.25rem);
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  --background: #0b0d11;
+  --chart-background: #11151b;
+  --surface: #151920;
+  --raised: #1d2330;
+  --inset: #12151e;
+  --line: #303945;
+  --text: #f3f5f8;
+  --soft: #d0d7e2;
+  --muted: #aab6c5;
+  --accent: #ffdd2d;
+  --accent-hover: #ffe66b;
+  --accent-ink: #211b08;
+  --accent-surface: #332d1b;
+  --accent-glow: rgb(255 221 45 / 14%);
+  --lavender: #c9bdf7;
+  --lavender-surface: #2a253a;
+  --navigator-glow: rgb(126 106 195 / 10%);
+  --negative: #f1a1af;
+  --negative-surface: #372634;
+  --blue: #afcff5;
+  --blue-surface: #223246;
+  --green: #8bdba4;
+  --green-surface: #213427;
+  --gold: #e4c790;
+  --gold-surface: #332b22;
+  --chart-grid: #242b35;
+  --chart-cursor: #748395;
+  --chart-label: #394759;
+  --chart-price: #6d5b28;
+  --chart-up: #65c98b;
+  --chart-down: #df899b;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --radius-control: 10px;
+  --radius-panel: 18px;
+  --duration: 180ms;
+  --shell-width: 1680px;
+  --gutter: clamp(20px, 2.5vw, 40px);
+}
