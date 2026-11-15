@@ -8,7 +8,6 @@ from langchain_ollama import OllamaEmbeddings
 
 warnings.filterwarnings("ignore")
 
-# Схемы для Outlines (гарантия строгого JSON)
 class EventClassification(BaseModel):
     type: Literal["FACT", "RUMOR"] = Field(description="FACT = факт. RUMOR = слух/паника.")
 
@@ -21,8 +20,8 @@ class NLPAgent:
     Гибридный агент анализа новостей (Hard Rules + RAG + Qwen 2.5).
     """
     def __init__(self):
+        # Оставляем только жесткие блокирующие правила
         self.fatal_keywords = ["дефолт", "банкротство", "остановка торгов", "технический сбой"]
-        self.panic_keywords = ["паника", "слив", "обвал", "ужас", "страшно"]
         
         try:
             self.knowledge_base = [
@@ -47,16 +46,15 @@ class NLPAgent:
         # УРОВЕНЬ 1: Мгновенная проверка на смертельные угрозы
         for word in self.fatal_keywords:
             if word in text_lower:
-                return {"allow_trade": False, "reason": f"Hard Rule: {word}"}
+                return {"status": "BLOCK", "reason": f"Hard Rule: {word}"}
                 
-        # УРОВЕНЬ 2: Мгновенная проверка на панику (разрешаем, экономим время LLM)
-        for word in self.panic_keywords:
-            if word in text_lower:
-                return {"allow_trade": True, "reason": "Hard Rule: Паника толпы"}
+        # УРОВЕНЬ 2: УБРАНО АВТОМАТИЧЕСКОЕ РАЗРЕШЕНИЕ ПО ЭМОЦИЯМ
+        # Слова "паника", "слив" больше не дают статус ALLOW. 
+        # Они просто передаются на анализ LLM вместе с остальным текстом.
 
-        # УРОВЕНЬ 3: Если не сработали жесткие правила - спрашиваем Qwen
+        # УРОВЕНЬ 3: Fail-Closed (если LLM недоступна, запрещаем)
         if not self.is_llm_ready:
-            return {"allow_trade": True, "reason": "Нейтральный фон (LLM offline)"}
+            return {"status": "ERROR", "reason": "AI недоступен. Безопасный режим."}
 
         try:
             prompt_cls = f"Прочитай новость. Это факт или слух? Новость: {text}"
@@ -64,7 +62,7 @@ class NLPAgent:
             cls_res = EventClassification.model_validate_json(cls_raw)
             
             if cls_res.type == "RUMOR":
-                return {"allow_trade": True, "reason": "LLM: Слух/Паника"}
+                return {"status": "ALLOW", "reason": "LLM: Слух/Паника"}
                 
             context_docs = self.retriever.invoke(text)
             context = "\n".join([doc.page_content for doc in context_docs])
@@ -74,9 +72,10 @@ class NLPAgent:
             dec_res = TradeDecision.model_validate_json(dec_raw)
             
             if dec_res.action == "BLOCK":
-                return {"allow_trade": False, "reason": f"LLM: {dec_res.reason}"}
+                return {"status": "BLOCK", "reason": f"LLM: {dec_res.reason}"}
             else:
-                return {"allow_trade": True, "reason": f"LLM: {dec_res.reason}"}
+                return {"status": "ALLOW", "reason": f"LLM: {dec_res.reason}"}
 
         except Exception as e:
-            return {"allow_trade": True, "reason": f"Нейтральный фон (LLM error: {e})"}
+            # Fail-Closed при любой ошибке LLM
+            return {"status": "ERROR", "reason": f"Ошибка AI: {e}"}

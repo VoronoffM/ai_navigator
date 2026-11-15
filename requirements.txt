@@ -6,3 +6,10 @@ requests
 python-dotenv
 t-tech-investments
 streamlit-autorefresh
+langchain
+langchain-community
+langchain-ollama
+chromadb
+outlines
+ollama
+pydantic

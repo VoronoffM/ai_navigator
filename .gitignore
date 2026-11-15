@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 regime.txt
 ai_navigator.zip
+chroma_db/

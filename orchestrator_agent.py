@@ -12,25 +12,29 @@ class OrchestratorAgent:
         self.risk = RiskAgent()
 
     def decide_trade(self, ticker, last_z_score, news_text, cash, shares_count, price, lot_size):
-        """
-        Возвращает решение: BUY, SELL, HOLD или BLOCKED.
-        """
         # 1. Спрашиваем Математику
         signal = self.quant.get_signal(last_z_score)
         if signal == "HOLD":
             return {"action": "HOLD", "reason": "Нет сигнала"}
 
-        # 2. Спрашиваем NLP (защита от плохих новостей)
-        nlp_res = self.nlp.analyze_news(news_text)
-        if not nlp_res["allow_trade"]:
-            return {"action": "BLOCKED", "reason": f"NLP: {nlp_res['reason']}"}
-
-        # 3. Спрашиваем Risk-менеджмент
+        # 2. ЛОГИКА ДЛЯ ПОКУПКИ (Вход в риск)
         if signal == "BUY":
+            # Проверяем новости ТОЛЬКО перед покупкой
+            nlp_res = self.nlp.analyze_news(news_text)
+            if nlp_res["status"] == "ERROR":
+                return {"action": "BLOCKED", "reason": f"NLP (Fail-Closed): {nlp_res['reason']}"}
+            if nlp_res["status"] == "BLOCK":
+                return {"action": "BLOCKED", "reason": f"NLP: {nlp_res['reason']}"}
+            
+            # Если новости чистые, проверяем риск
             is_safe, msg = self.risk.validate_buy_order(cash, shares_count, price, lot_size)
             if not is_safe:
                 return {"action": "BLOCKED", "reason": f"Risk: {msg}"}
+
+        # 3. ЛОГИКА ДЛЯ ПРОДАЖИ (Сокращение риска)
         elif signal == "SELL":
+            # ВАЖНО: Мы НЕ вызываем NLP. Если у нас открыта позиция, 
+            # плохие новости — это повод быстрее продать, а не блокировать выход.
             is_safe, msg = self.risk.validate_sell_order(shares_count, lot_size)
             if not is_safe:
                 return {"action": "BLOCKED", "reason": f"Risk: {msg}"}
