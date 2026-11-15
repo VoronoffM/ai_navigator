@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react';
 import type { CandlestickData, UTCTimestamp } from 'lightweight-charts';
 
 export const symbols = [
-  { ticker: 'GAZP', name: 'Газпром', color: 'blue', letter: 'Г' },
-  { ticker: 'SBER', name: 'Сбербанк', color: 'green', letter: 'С' },
-  { ticker: 'LKOH', name: 'Лукойл', color: 'red', letter: 'Л' },
-  { ticker: 'ROSN', name: 'Роснефть', color: 'violet', letter: 'Р' },
+  { ticker: 'GAZP', name: 'Газпром', logo: '/logos/gazp.png' },
+  { ticker: 'SBER', name: 'Сбербанк', logo: '/logos/sber.png' },
+  { ticker: 'LKOH', name: 'Лукойл', logo: '/logos/lkoh.png' },
+  { ticker: 'ROSN', name: 'Роснефть', logo: '/logos/rosn.png' },
 ] as const;
 
 export type Ticker = (typeof symbols)[number]['ticker'];

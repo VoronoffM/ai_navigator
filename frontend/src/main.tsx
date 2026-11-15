@@ -87,7 +87,7 @@ function Terminal() {
         <section className="market-panel" aria-labelledby="instrument-title">
           <div className="market-heading">
             <div className="asset-heading">
-              <span className={`symbol-logo ${instrument.color}`} aria-hidden="true">{instrument.letter}</span>
+              <img className="symbol-logo" src={instrument.logo} alt="" width={50} height={50} />
               <div>
                 <h1 id="instrument-title">{selectedQuote?.name || instrument.name}</h1>
                 <div className="instrument-context"><strong>{ticker}</strong><span>Московская биржа</span></div>

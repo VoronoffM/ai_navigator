@@ -108,19 +108,13 @@ h2, h3 { font-size: var(--text-section); line-height: 1.3; font-weight: var(--we
 .asset-heading { display: flex; align-items: center; gap: var(--space-4); }
 .asset-heading > div { min-width: 0; }
 .symbol-logo {
-  display: grid;
-  place-items: center;
+  display: block;
   width: 50px;
   height: 50px;
   flex: none;
   border-radius: 14px;
-  font-size: 22px;
-  font-weight: var(--weight-medium);
+  object-fit: contain;
 }
-.symbol-logo.blue { color: var(--blue); background: var(--blue-surface); }
-.symbol-logo.green { color: var(--green); background: var(--green-surface); }
-.symbol-logo.red { color: var(--negative); background: var(--negative-surface); }
-.symbol-logo.violet { color: var(--gold); background: var(--gold-surface); }
 .market-heading h1 { font-size: var(--text-instrument); line-height: 1.1; font-weight: var(--weight-semibold); letter-spacing: -.048em; overflow-wrap: anywhere; }
 .instrument-context { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-1); color: var(--muted); font-size: var(--text-meta); }
 .instrument-context strong { color: var(--soft); font-weight: var(--weight-medium); }
