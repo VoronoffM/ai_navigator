@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Activity, ArrowLeft, ArrowRight, ChartNoAxesColumnIncreasing, Check, Newspaper, Plus, Settings2 } from 'lucide-react';
+import type { AnalysisConfig, CheckName, Profile } from './analysis';
 import { symbols, type Ticker } from './market';
 import { describeTrigger, draftFrom, readScenarios, storageKey, templates, type Scenario, type ScenarioSettings, type Trigger } from './scenarios';
 
@@ -19,10 +20,26 @@ function loadScenarios() {
   }
 }
 
-export function AgentStudio({ visible }: { visible: boolean }) {
+export function AgentStudio({ visible, analysisConfig, analysisConfigFailed, profile, onProfileChange }: {
+  visible: boolean;
+  analysisConfig?: AnalysisConfig;
+  analysisConfigFailed: boolean;
+  profile: Profile;
+  onProfileChange: (profile: Profile) => void;
+}) {
   const [saved, setSaved] = useState(loadScenarios);
   const [editor, setEditor] = useState<{ settings: ScenarioSettings; id?: string }>();
   const [feedback, setFeedback] = useState('');
+  const [profileError, setProfileError] = useState('');
+
+  function updateProfile(next: Profile) {
+    try {
+      onProfileChange(next);
+      setProfileError('');
+    } catch {
+      setProfileError('Профиль применён. Не удалось сохранить его в браузере.');
+    }
+  }
   const heading = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
@@ -86,7 +103,35 @@ export function AgentStudio({ visible }: { visible: boolean }) {
         )}
       </header>
 
-      <p className="studio-notice">Настройки хранятся в этом браузере. Сценарии здесь не запускаются и не отправляют уведомления.</p>
+      <section className="studio-analysis" aria-labelledby="analysis-profile-title">
+        <h2 id="analysis-profile-title">Профиль исторического разбора</h2>
+        {analysisConfig ? <>
+          <label className="studio-field">Модель · {analysisConfig.provider}
+            <select value={profile.model} onChange={(event) => updateProfile({ ...profile, model: event.target.value })}>
+              {analysisConfig.models.map((model) => <option key={model} value={model}>{model}</option>)}
+            </select>
+          </label>
+          <fieldset className="studio-assets">
+            <legend>Проверки</legend>
+            <div className="studio-asset-options">
+              {(Object.entries(analysisConfig.checks) as [CheckName, string][]).map(([name, label]) => (
+                <label className="watch-chip" key={name}>
+                  <input type="checkbox" checked={profile.checks?.includes(name) ?? false} onChange={(event) => {
+                    const selected = profile.checks ?? [];
+                    const checks = event.target.checked ? [...selected, name] : selected.filter((item) => item !== name);
+                    updateProfile({ ...profile, checks });
+                  }} />
+                  <span className="checkbox" aria-hidden="true"><Check size={11} strokeWidth={2.5} /></span>{label}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+          <p>Профиль применяется при следующем воспроизведении.</p>
+          {profileError && <p className="studio-error" role="status">{profileError}</p>}
+        </> : <p role="status">{analysisConfigFailed ? 'Настройки сервера недоступны.' : 'Загружаем настройки…'}</p>}
+      </section>
+
+      <p className="studio-notice">Сценарии ниже хранятся в этом браузере. Их можно редактировать и сохранять.</p>
       {saved.issue && <p className="studio-error" role="alert">{saved.issue}</p>}
       <span className="studio-feedback" role="status">{feedback}</span>
 

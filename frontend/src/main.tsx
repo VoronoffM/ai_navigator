@@ -1,11 +1,13 @@
-import { StrictMode, useState } from 'react';
+import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ChartCandlestick, CircleAlert, Clock3, Radar, RefreshCw } from 'lucide-react';
 import '@fontsource-variable/inter/wght.css';
+import { normalizeProfile, readProfile, saveProfile, type AnalysisConfig, type Profile } from './analysis';
 import { AgentStudio } from './AgentStudio';
 import { Chart } from './Chart';
 import { Navigator } from './Navigator';
 import { marketTime, number, symbols, useMarketResource, type Candle, type Interval, type QuoteRow, type Ticker } from './market';
+import type { ReplayEpisode } from './replay';
 import './style.css';
 import './studio.css';
 
@@ -16,16 +18,45 @@ function Terminal() {
   const [ticker, setTicker] = useState<Ticker>('GAZP');
   const [interval, setInterval] = useState<Interval>('1h');
   const [revision, setRevision] = useState(0);
+  const [replayRevision, setReplayRevision] = useState(0);
+  const [replayCount, setReplayCount] = useState<number | null>(null);
+  const [savedProfile, setSavedProfile] = useState(readProfile);
+  const [replayProfile, setReplayProfile] = useState<Profile>({});
+  const configResource = useMarketResource<AnalysisConfig>('/api/analysis/config', 0, false);
+  const config = configResource.status === 'ready' ? configResource.data : undefined;
   const quotes = useMarketResource<QuoteRow[]>('/api/quotes', revision);
   const candles = useMarketResource<Candle[]>(`/api/candles/${ticker}?interval=${interval}`, revision);
-  const instrument = symbols.find((item) => item.ticker === ticker)!;
+  const replayResource = useMarketResource<ReplayEpisode>('/api/replay/gazprom', replayRevision, false);
+  const episode = replayResource.status === 'ready' ? replayResource.data : null;
+  const historical = replayCount !== null;
+  const replayRunning = replayCount !== null && episode !== null && replayCount < episode.candles.length;
+  const shownTicker = historical ? 'GAZP' : ticker;
+  const shownInterval = historical ? '1h' : interval;
+  const instrument = symbols.find((item) => item.ticker === shownTicker)!;
   const rows = quotes.status === 'ready' ? quotes.data : [];
   const selectedQuote = rows.find((row) => row.ticker === ticker);
   const quoteIssue = quotes.status === 'error' ? quotes.issue : rows.find((row) => row.issue)?.issue;
   const chartIssue = candles.status === 'error' ? candles.issue : null;
-  const bars = candles.status === 'ready' ? candles.data : [];
+  const bars = historical ? episode?.candles.slice(0, replayCount) ?? []
+    : candles.status === 'ready' ? candles.data : [];
   const lastBar = bars[bars.length - 1];
+  const event = historical && episode?.event && lastBar?.time >= episode.event.candleTime ? episode.event : null;
+  const replayIssue = replayResource.status === 'error' ? replayResource.issue.message : null;
+  const headerPrice = historical ? lastBar?.close : selectedQuote?.quote?.price;
   const loading = quotes.status === 'loading' || candles.status === 'loading';
+
+  useEffect(() => {
+    if (!replayRunning || replayCount === null) return;
+    const timer = window.setTimeout(() => setReplayCount(replayCount + 1), 1100);
+    return () => window.clearTimeout(timer);
+  }, [replayRunning, replayCount]);
+
+  function playReplay() {
+    if (episode) {
+      setReplayProfile(normalizeProfile(savedProfile, config));
+      setReplayCount(episode.warmupCount);
+    } else setReplayRevision((value) => value + 1);
+  }
 
   function refresh() {
     setRevision((value) => value + 1);
@@ -52,11 +83,11 @@ function Terminal() {
               onClick={() => setSection('studio')}>Agent Studio</button>
           </nav>
           <div className="topbar-actions" hidden={section !== 'market'}>
-            <div className="source"><span>T-Invest API</span><span className="source-mode">Песочница</span></div>
-            <button className="icon-button" aria-label="Обновить рыночные данные" title="Обновить рыночные данные"
+            <div className="source"><span>{historical ? 'T-Invest MCP' : 'T-Invest API'}</span><span className="source-mode">{historical ? 'Исторический режим' : 'Песочница'}</span></div>
+            {!historical && <button className="icon-button" aria-label="Обновить рыночные данные" title="Обновить рыночные данные"
               type="button" disabled={loading} onClick={refresh}>
               <RefreshCw size={16} className={loading ? 'rotating' : undefined} aria-hidden="true" />
-            </button>
+            </button>}
           </div>
         </div>
       </header>
@@ -67,19 +98,21 @@ function Terminal() {
           <div className="symbol-list">
             {symbols.map((symbol) => {
               const record = rows.find((row) => row.ticker === symbol.ticker);
+              const quote = historical ? undefined : record?.quote;
+              const price = historical && symbol.ticker === shownTicker ? headerPrice : quote?.price;
               return (
-                <button className="symbol" type="button" key={symbol.ticker} aria-pressed={ticker === symbol.ticker}
-                  title={record?.name || symbol.name} onClick={() => setTicker(symbol.ticker)}>
+                <button className="symbol" type="button" key={symbol.ticker} aria-pressed={shownTicker === symbol.ticker}
+                  title={record?.name || symbol.name} disabled={historical} onClick={() => setTicker(symbol.ticker)}>
                   <span className="symbol-name"><strong>{symbol.ticker}</strong><small>{record?.name || symbol.name}</small></span>
-                  <span className="symbol-price figures" title={record?.quote ? marketTime(record.quote.time) : record?.issue?.message}>
-                    {record?.quote ? number.format(record.quote.price) : '—'}
+                  <span className="symbol-price figures" title={quote ? marketTime(quote.time) : historical ? undefined : record?.issue?.message}>
+                    {price !== undefined ? number.format(price) : '—'}
                   </span>
                 </button>
               );
             })}
           </div>
           <p className="symbols-footer" role="status">
-            {quotes.status === 'loading' ? 'Загружаем котировки…'
+            {historical ? '' : quotes.status === 'loading' ? 'Загружаем котировки…'
               : quoteIssue?.message ?? (rows.some((row) => row.quote) ? '' : 'Нет последних цен в песочнице.')}
           </p>
         </aside>
@@ -89,15 +122,16 @@ function Terminal() {
             <div className="asset-heading">
               <img className="symbol-logo" src={instrument.logo} alt="" width={50} height={50} />
               <div>
-                <h1 id="instrument-title">{selectedQuote?.name || instrument.name}</h1>
-                <div className="instrument-context"><strong>{ticker}</strong><span>Московская биржа</span></div>
+                <h1 id="instrument-title">{(!historical && selectedQuote?.name) || instrument.name}</h1>
+                <div className="instrument-context"><strong>{shownTicker}</strong><span>{historical ? '22 мая 2025 · Московская биржа' : 'Московская биржа'}</span></div>
               </div>
             </div>
             <div className="market-price">
-              <strong className="figures">{selectedQuote?.quote ? <>{number.format(selectedQuote.quote.price)} <span>₽</span></> : '—'}</strong>
+              <strong className="figures">{headerPrice !== undefined ? <>{number.format(headerPrice)} <span>₽</span></> : '—'}</strong>
               <div className="quote-meta">
-                <span>Последняя сделка</span>
-                <span className="figures">{selectedQuote?.quote ? marketTime(selectedQuote.quote.time)
+                <span>{historical ? 'Закрытие свечи' : 'Последняя сделка'}</span>
+                <span className="figures">{historical && lastBar ? marketTime(lastBar.time + 3600)
+                  : selectedQuote?.quote ? marketTime(selectedQuote.quote.time)
                   : quotes.status === 'loading' ? 'Загрузка…' : selectedQuote?.issue || quotes.status === 'error' ? 'Цена недоступна' : 'Нет последней цены'}</span>
               </div>
             </div>
@@ -108,13 +142,13 @@ function Terminal() {
               <h2>Свечной график</h2>
               <div className="intervals" role="group" aria-label="Интервал свечей">
                 {intervals.map((option) => (
-                  <button type="button" key={option.value} aria-pressed={option.value === interval}
-                    onClick={() => setInterval(option.value)}>{option.label}</button>
+                  <button type="button" key={option.value} aria-pressed={option.value === shownInterval}
+                    disabled={historical} onClick={() => setInterval(option.value)}>{option.label}</button>
                 ))}
               </div>
             </div>
             {lastBar ? (
-              <Chart key={`${ticker}:${interval}`} candles={bars} interval={interval} />
+              <Chart key={historical ? 'replay:gazprom' : `${ticker}:${interval}`} candles={bars} interval={shownInterval} />
             ) : (
               <div className="chart-state" role="status">
                 <div className="chart-state-content">
@@ -137,9 +171,16 @@ function Terminal() {
           </div>
         </section>
 
-        <Navigator />
+        <Navigator event={event} profile={replayProfile} running={replayRunning} replay={historical}
+          loading={replayResource.status === 'loading'} issue={replayIssue} threshold={episode?.thresholdPercent}
+          onPlay={playReplay} onExit={() => setReplayCount(null)} />
       </main>
-      <AgentStudio visible={section === 'studio'} />
+      <AgentStudio visible={section === 'studio'} analysisConfig={config}
+        analysisConfigFailed={configResource.status === 'error'} profile={normalizeProfile(savedProfile, config)}
+        onProfileChange={(profile) => {
+          setSavedProfile(profile);
+          saveProfile(profile);
+        }} />
     </>
   );
 }

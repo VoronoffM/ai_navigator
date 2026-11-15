@@ -55,6 +55,12 @@ class SandboxMarket:
         except httpx.TimeoutException as exc:
             raise MarketError("timeout", "Песочница Т‑Инвестиций не ответила вовремя.", 504) from exc
         except httpx.RequestError as exc:
+            if "CERTIFICATE_VERIFY_FAILED" in str(exc):
+                raise MarketError(
+                    "certificate",
+                    "Не удалось проверить сертификат песочницы. Проверьте SSL_CERT_FILE в настройках сервера.",
+                    503,
+                ) from exc
             raise MarketError("connection", "Не удалось подключиться к песочнице Т‑Инвестиций.", 503) from exc
 
         if response.status_code in (401, 403):

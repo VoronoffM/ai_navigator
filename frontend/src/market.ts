@@ -39,7 +39,7 @@ export function marketTime(value: string | number) {
 
 type Resource<T> = { status: 'loading' } | { status: 'ready'; data: T } | { status: 'error'; issue: Issue };
 
-export function useMarketResource<T>(path: string, revision: number): Resource<T> {
+export function useMarketResource<T>(path: string, revision: number, refresh = true): Resource<T> {
   const key = `${path}:${revision}`;
   const [result, setResult] = useState<{ key: string; value: Resource<T> }>();
 
@@ -71,7 +71,7 @@ export function useMarketResource<T>(path: string, revision: number): Resource<T
       }
       if (!controller.signal.aborted) {
         setResult({ key, value });
-        nextRefresh = window.setTimeout(fetchData, 60_000);
+        if (refresh) nextRefresh = window.setTimeout(fetchData, 60_000);
       }
     }
 
@@ -80,7 +80,7 @@ export function useMarketResource<T>(path: string, revision: number): Resource<T
       controller.abort();
       window.clearTimeout(nextRefresh);
     };
-  }, [key, path]);
+  }, [key, path, refresh]);
 
   return result?.key === key ? result.value : { status: 'loading' };
 }

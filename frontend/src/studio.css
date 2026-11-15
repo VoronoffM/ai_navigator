@@ -159,3 +159,16 @@
   .studio-form { padding: var(--space-4); }
   .studio-row { align-items: start; flex-direction: column; }
 }
+
+.studio-analysis {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}
+.studio-analysis h2 { font-size: var(--text-emphasis); }
+.studio-analysis p { margin: 0; color: var(--muted); font-size: var(--text-meta); }
