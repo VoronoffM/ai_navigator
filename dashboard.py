@@ -99,7 +99,9 @@ for ticker, df in market_data.items():
 
 df_plan = pd.DataFrame(action_plan)
 
-# ЛЕВОЕ МЕНЮ
+# ==============================================================================
+# ЛЕВОЕ МЕНЮ (САЙДБАР)
+# ==============================================================================
 with st.sidebar:
     st.header("💼 Ваш Портфель")
     st.metric("Общий Капитал (RUB)", f"{total_equity:,.2f}")
@@ -125,7 +127,8 @@ with st.sidebar:
 
     st.divider()
     st.markdown("### 🦾 Режим работы")
-    autopilot = st.toggle("🤖 АВТОПИЛОТ (ВСЕ БУМАГИ)", value=False)
+    # Отключено для консервативного режима демо
+    autopilot = st.toggle("🤖 АВТОПИЛОТ (ВСЕ БУМАГИ)", value=False, disabled=True)
     
     st.divider()
     st.markdown("### 📰 Симуляция новостей")
@@ -137,7 +140,9 @@ with st.sidebar:
     else:
         news_text = "Обычный день, новостей нет."
 
+# ==============================================================================
 # ЦЕНТРАЛЬНАЯ ЧАСТЬ: СКРИНЕР
+# ==============================================================================
 st.subheader("📊 Скринер рынка")
 cols = st.columns(len(TICKERS))
 for i, row in df_plan.iterrows():
@@ -156,7 +161,9 @@ st.subheader("🎯 План Действий (Резюме по бумагам)"
 st.dataframe(df_plan[["Тикер", "Название", "Цена", "Z-Score", "Сигнал", "В портфеле", "Стоимость"]], width='stretch', hide_index=True)
 st.divider()
 
+# ==============================================================================
 # НИЖНЯЯ ЧАСТЬ: ГРАФИК И УПРАВЛЕНИЕ
+# ==============================================================================
 sel = st.session_state.selected_ticker
 sel_df = market_data[sel]
 sel_info = df_plan[df_plan['Тикер'] == sel].iloc[0]
@@ -194,15 +201,25 @@ with col_controls:
 
     c1, c2 = st.columns(2)
     if c1.button(f"🟢 КУПИТЬ", width='stretch', disabled=c1_disabled):
-        p, q, s = executor.place_order(instruments_map[sel]["figi"], acc_id, OrderDirection.ORDER_DIRECTION_BUY, qty_lots=lots_to_trade)
-        if s == "FILLED":
-            total_sum = q * current_lot_size * p
-            msg = f"🛒 Ручная покупка {q} лот(ов) {sel} по {p:.2f} ₽ | Сумма: {total_sum:,.2f} ₽"
-            add_log(msg)
-            send_tg_alert(msg)
-            st.cache_data.clear(); st.rerun()
+        # Ручная покупка теперь проходит через оркестратор!
+        decision = orchestrator.decide_trade(
+            ticker=sel, last_z_score=sel_info['Z-Score'], news_text=news_text, 
+            cash=cash, shares_count=current_pos, price=sel_info['Цена'], lot_size=current_lot_size
+        )
+        
+        if decision["action"] == "BUY":
+            p, q, s = executor.place_order(instruments_map[sel]["figi"], acc_id, OrderDirection.ORDER_DIRECTION_BUY, qty_lots=lots_to_trade)
+            if s == "FILLED":
+                total_sum = q * current_lot_size * p
+                msg = f"🛒 Ручная покупка {q} лот(ов) {sel} по {p:.2f} ₽ | Сумма: {total_sum:,.2f} ₽"
+                add_log(msg)
+                send_tg_alert(msg)
+                st.cache_data.clear(); st.rerun()
+            else:
+                add_log(f"❌ Ошибка: {s}")
         else:
-            add_log(f"❌ Ошибка: {s}")
+            st.error(f"🛡️ {decision['reason']}")
+            add_log(f"🛡️ Ручная покупка {sel} заблокирована: {decision['reason']}")
 
     if c2.button(f"🔴 ПРОДАТЬ", width='stretch', disabled=c2_disabled):
         if current_pos >= (lots_to_trade * current_lot_size):
@@ -221,7 +238,9 @@ with col_controls:
     for log in reversed(st.session_state.logs):
         st.code(log, language="bash")
 
-# АВТОПИЛОТ
+# ==============================================================================
+# АВТОПИЛОТ (Блокируется тумблером, но логика сохранена)
+# ==============================================================================
 if autopilot:
     for _, row in df_plan.iterrows():
         t, pos_count, price = row["Тикер"], row["В портфеле"], row["Цена"]

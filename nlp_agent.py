@@ -2,7 +2,7 @@ import warnings
 import ollama
 import outlines
 from typing import Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from langchain_community.vectorstores import Chroma
 from langchain_ollama import OllamaEmbeddings
 
@@ -16,12 +16,9 @@ class TradeDecision(BaseModel):
     reason: str = Field(description="Краткое объяснение на русском.")
 
 class NLPAgent:
-    """
-    Гибридный агент анализа новостей (Hard Rules + RAG + Qwen 2.5).
-    """
     def __init__(self):
-        # Оставляем только жесткие блокирующие правила
         self.fatal_keywords = ["дефолт", "банкротство", "остановка торгов", "технический сбой"]
+        self.is_llm_ready = False
         
         try:
             self.knowledge_base = [
@@ -38,21 +35,24 @@ class NLPAgent:
             self.is_llm_ready = True
         except Exception as e:
             print(f"⚠️ LLM offline: {e}")
-            self.is_llm_ready = False
+
+    def close(self):
+        """Закрывает сетевые соединения для предотвращения ResourceWarning."""
+        try:
+            if hasattr(self, 'ollama_client'):
+                self.ollama_client._client.close()
+        except Exception:
+            pass
 
     def analyze_news(self, text):
         text_lower = text.lower()
         
-        # УРОВЕНЬ 1: Мгновенная проверка на смертельные угрозы
+        # УРОВЕНЬ 1: Жесткие правила (Доказанный риск)
         for word in self.fatal_keywords:
             if word in text_lower:
                 return {"status": "BLOCK", "reason": f"Hard Rule: {word}"}
                 
-        # УРОВЕНЬ 2: УБРАНО АВТОМАТИЧЕСКОЕ РАЗРЕШЕНИЕ ПО ЭМОЦИЯМ
-        # Слова "паника", "слив" больше не дают статус ALLOW. 
-        # Они просто передаются на анализ LLM вместе с остальным текстом.
-
-        # УРОВЕНЬ 3: Fail-Closed (если LLM недоступна, запрещаем)
+        # УРОВЕНЬ 2: Отказ техники (Fail-Closed)
         if not self.is_llm_ready:
             return {"status": "ERROR", "reason": "AI недоступен. Безопасный режим."}
 
@@ -61,8 +61,9 @@ class NLPAgent:
             cls_raw = self.model(prompt_cls, EventClassification)
             cls_res = EventClassification.model_validate_json(cls_raw)
             
+            # Неподтвержденный слух = Блокировка (в консервативном режиме)
             if cls_res.type == "RUMOR":
-                return {"status": "ALLOW", "reason": "LLM: Слух/Паника"}
+                return {"status": "BLOCK", "reason": "Неподтвержденный слух (нет доказательств)"}
                 
             context_docs = self.retriever.invoke(text)
             context = "\n".join([doc.page_content for doc in context_docs])
@@ -76,6 +77,7 @@ class NLPAgent:
             else:
                 return {"status": "ALLOW", "reason": f"LLM: {dec_res.reason}"}
 
+        except ValidationError as e:
+            return {"status": "ERROR", "reason": f"Некорректный ответ LLM: {str(e)}"}
         except Exception as e:
-            # Fail-Closed при любой ошибке LLM
-            return {"status": "ERROR", "reason": f"Ошибка AI: {e}"}
+            return {"status": "ERROR", "reason": f"Ошибка AI: {str(e)}"}
