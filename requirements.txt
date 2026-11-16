@@ -7,7 +7,7 @@ python-dotenv
 t-tech-investments
 streamlit-autorefresh
 langchain
-langchain-community
+langchain-chroma
 langchain-ollama
 chromadb
 outlines

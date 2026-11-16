@@ -10,23 +10,23 @@ class OrchestratorAgent:
 
     def decide_trade(self, ticker, last_z_score, news_text, cash, shares_count, price, lot_size):
         signal = self.quant.get_signal(last_z_score)
+        
         if signal == "HOLD":
-            return {"action": "HOLD", "reason": "Нет сигнала"}
+            return {"action": "HOLD", "report": None, "reason": "Нет сигнала"}
 
         if signal == "BUY":
-            nlp_res = self.nlp.analyze_news(news_text)
-            # Строгая проверка: только явный ALLOW разрешает идти дальше
+            nlp_res = self.nlp.analyze_news(news_text, ticker=ticker)
+            
             if nlp_res.get("status") != "ALLOW":
-                return {"action": "BLOCKED", "reason": f"NLP ({nlp_res.get('status', 'UNKNOWN')}): {nlp_res.get('reason', 'Нет данных')}"}
+                return {"action": "BLOCKED", "report": nlp_res, "reason": f"AI: {nlp_res.get('explanations', 'Запрет')}"}
             
             is_safe, msg = self.risk.validate_buy_order(cash, shares_count, price, lot_size)
             if not is_safe:
-                return {"action": "BLOCKED", "reason": f"Risk: {msg}"}
+                return {"action": "BLOCKED", "report": nlp_res, "reason": f"Risk: {msg}"}
+
+            return {"action": "BUY", "report": nlp_res, "reason": "Разрешено"}
 
         elif signal == "SELL":
-            # Выход не блокируется NLP
-            is_safe, msg = self.risk.validate_sell_order(shares_count, lot_size)
-            if not is_safe:
-                return {"action": "BLOCKED", "reason": f"Risk: {msg}"}
+            return {"action": "SELL", "report": None, "reason": "Выход из позиции"}
 
-        return {"action": signal, "reason": "Все проверки пройдены"}
+        return {"action": signal, "report": None, "reason": "OK"}
