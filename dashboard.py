@@ -4,6 +4,8 @@ import plotly.graph_objects as go
 from datetime import datetime
 import os
 import warnings
+import threading
+import requests
 from dotenv import load_dotenv
 from streamlit_autorefresh import st_autorefresh
 from t_tech.invest.schemas import OrderDirection, MoneyValue
@@ -29,7 +31,25 @@ if "ai_report" not in st.session_state: st.session_state.ai_report = None
 if "report_time" not in st.session_state: st.session_state.report_time = ""
 if "selected_ticker" not in st.session_state: st.session_state.selected_ticker = "GAZP"
 
-# КЭШИРОВАНИЕ АГЕНТОВ
+# ==============================================================================
+# 🔥 АВТОМАТИЧЕСКИЙ ПРОГРЕВ НЕЙРОСЕТИ (В ФОНЕ)
+# ==============================================================================
+def warm_up_llm():
+    try:
+        url = "http://localhost:11434/api/generate"
+        payload = {"model": "qwen2.5:3b", "prompt": "Привет", "stream": False}
+        requests.post(url, json=payload, timeout=60)
+        print("🔥 Нейросеть Qwen успешно прогрета и загружена в RAM.")
+    except Exception as e:
+        print(f"⚠️ Не удалось прогреть нейросеть: {e}")
+
+if "llm_warmed_up" not in st.session_state:
+    threading.Thread(target=warm_up_llm, daemon=True).start()
+    st.session_state.llm_warmed_up = True
+
+# ==============================================================================
+# 🤖 КЭШИРОВАНИЕ АГЕНТОВ
+# ==============================================================================
 @st.cache_resource
 def get_agents():
     market = MarketAgent(TOKEN)
@@ -40,9 +60,11 @@ def get_agents():
 market, executor, orchestrator = get_agents()
 quant = QuantAgent()
 
+# ДОБАВЛЕНЫ ВТБ И ЦИАН
 TICKERS = {
     "GAZP": "🔵 Газпром", "SBER": "🟢 Сбербанк", "LKOH": "🟡 Лукойл", 
-    "YDEX": "🔴 Яндекс", "T": "🟣 Т-Технологии", "GMKN": "⚪ Норникель"
+    "YDEX": "🔴 Яндекс", "T": "🟣 Т-Технологии", "GMKN": "⚪ Норникель",
+    "VTBR": "🟠 ВТБ", "CIAN": "🟤 Циан"
 }
 
 @st.cache_data(ttl=60)
@@ -64,6 +86,9 @@ if not market_data:
     st.error("Нет данных от API.")
     st.stop()
 
+# ==============================================================================
+# РАСЧЕТ ПОРТФЕЛЯ
+# ==============================================================================
 total_assets_value = 0 
 total_equity = cash    
 for ticker, df in market_data.items():
@@ -73,7 +98,9 @@ for ticker, df in market_data.items():
     total_assets_value += pos_val
     total_equity += pos_val
 
+# ==============================================================================
 # ЛЕВОЕ МЕНЮ
+# ==============================================================================
 with st.sidebar:
     st.header("💼 Портфель")
     st.metric("Общий Капитал (RUB)", f"{total_equity:,.2f}")
@@ -90,22 +117,31 @@ with st.sidebar:
     )
     if selected_ticker != st.session_state.selected_ticker:
         st.session_state.selected_ticker = selected_ticker
-        st.session_state.ai_report = None # Сбрасываем старый отчет при смене тикера
+        st.session_state.ai_report = None 
         st.rerun()
 
     st.divider()
     st.markdown("### 📰 Симуляция контекста")
     news_scenario = st.selectbox("Что произошло на рынке?", 
-        ["Обычный день", "Паника толпы (Слухи)", "Фундаментальный негатив (Санкции)"])
+        ["Обычный день", "Паника толпы (Слухи)", "Фундаментальный негатив (Санкции)", 
+         "Кейс: ВТБ (Дивидендный сюрприз)", "Кейс: Яндекс (События 2023)", "Кейс: Циан (Выкуп Т-Банком)"])
     
     if news_scenario == "Фундаментальный негатив (Санкции)":
         news_text = "Сбербанк попал под блокирующие санкции США."
     elif news_scenario == "Паника толпы (Слухи)":
         news_text = "В телеграм-каналах пишут, что все пропало, начинается паника!"
+    elif news_scenario == "Кейс: ВТБ (Дивидендный сюрприз)":
+        news_text = "ВТБ объявил неожиданно высокие дивиденды, рынок отреагировал резким ростом."
+    elif news_scenario == "Кейс: Яндекс (События 2023)":
+        news_text = "Яндекс столкнулся с геополитическими рисками и сменой контроля, акции упали."
+    elif news_scenario == "Кейс: Циан (Выкуп Т-Банком)":
+        news_text = "Т-Банк объявил о выкупе акций Циан, котировки отреагировали аномальным скачком."
     else:
         news_text = "Обычный торговый день, новостей нет."
 
+# ==============================================================================
 # ЦЕНТРАЛЬНАЯ ЧАСТЬ
+# ==============================================================================
 sel = st.session_state.selected_ticker
 sel_df = market_data[sel]
 last_z = sel_df['z_score'].iloc[-1]
@@ -125,12 +161,10 @@ with col_chart:
     fig.update_layout(template="plotly_dark", height=500, xaxis_rangeslider_visible=False, margin=dict(l=0, r=0, b=0, t=0))
     st.plotly_chart(fig, width='stretch')
 
-    # Убираем зависимость от триггера. Кнопка доступна всегда!
     st.info(f"Текущий Z-Score: {last_z:.2f} (Норма: от -1.5 до 1.5)")
     
     if st.button("🧠 Запустить ИИ-Анализ", width='stretch'):
-        with st.spinner("Нейросеть ищет причины..."):
-            # ВЫЗЫВАЕМ NLP НАПРЯМУЮ, без привязки к торговому сигналу
+        with st.spinner("Нейросеть анализирует контекст (на Intel Mac ~15 сек)..."):
             report = orchestrator.nlp.analyze_news(news_text, ticker=sel)
             st.session_state.ai_report = report
             st.session_state.report_time = datetime.now().strftime("%H:%M:%S МСК")
@@ -138,6 +172,7 @@ with col_chart:
 
 with col_ai:
     st.subheader("🤖 AI Navigator")
+    
     if st.session_state.ai_report:
         rep = st.session_state.ai_report
         status = rep.get("status", "ERROR")
@@ -166,7 +201,9 @@ with col_ai:
     else:
         st.info("Нажмите «Запустить ИИ-Анализ», чтобы получить сводку по текущей ситуации на рынке.")
 
+# ==============================================================================
 # СКРЫТЫЙ БЛОК РУЧНОЙ ТОРГОВЛИ
+# ==============================================================================
 st.divider()
 with st.expander("🛠️ Ручная торговля (Режим тестирования, не для питча)"):
     st.write(f"Текущая позиция: {current_pos} шт. (1 лот = {current_lot_size} акций)")

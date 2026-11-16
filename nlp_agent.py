@@ -39,7 +39,6 @@ class NLPAgent:
             self.ollama_client = ollama.Client()
             self.model = outlines.from_ollama(self.ollama_client, "qwen2.5:3b")
             self.is_llm_ready = True
-            print("✅ NLPAgent успешно инициализирован.")
         except Exception as e:
             print(f"⚠️ Ошибка инициализации NLPAgent: {e}")
 
@@ -70,15 +69,18 @@ class NLPAgent:
             context_docs = self.retriever.invoke(text)
             context_str = "\n".join([f"[{doc.metadata['source']} - {doc.metadata['date']}] {doc.page_content}" for doc in context_docs])
             
+            # ОБНОВЛЕННЫЙ ПРОМПТ: анализируем симуляцию, а не только базу
             prompt = f"""
             Ты — аналитический ассистент по акции {ticker}. 
-            Контекст из базы знаний: "{context_str}".
+            ВАЖНО: Тебе передан текст новости: "{text}"
+            И контекст из базы знаний: "{context_str}".
             
-            ВАЖНО: Если контекст не относится напрямую к акции {ticker}, НЕ ИСПОЛЬЗУЙ ЕГО. 
-            В поле facts напиши "Нет специфичных новостей". В поле sources напиши "Нет данных".
+            Твоя задача: Проанализировать именно ТЕКСТ НОВОСТИ. 
+            Если текст новости содержит угрозу (санкции, дефолт, паника) — ставь статус BLOCK.
+            Если текст нейтральный или это слухи — ставь ALLOW.
             
-            Сформируй структурированный отчет. Если новость несет фундаментальный риск — ставь статус BLOCK. 
-            Если это просто паника или нейтральная новость — ставь ALLOW.
+            В поле facts напиши краткую суть переданной новости.
+            В поле sources напиши "Симуляция новости" или источник из базы, если он подходит.
             """
             
             raw_report = self.model(prompt, AIAnalysisReport)
@@ -89,10 +91,6 @@ class NLPAgent:
             unconfirmed_text = report.unconfirmed.strip() if report.unconfirmed and report.unconfirmed.strip() else "Информация требует проверки."
             sources_text = report.sources.strip() if report.sources and report.sources.strip() else "Источники не указаны."
             trace_text = report.reasoning_trace.strip() if report.reasoning_trace and report.reasoning_trace.strip() else "Модель не оставила логов."
-
-            if ticker == "GAZP" and "Лукойл" in sources_text:
-                sources_text = "Нет данных по Газпрому."
-                facts_text = "Нет специфичных новостей по Газпрому."
 
             return {
                 "status": report.status, "facts": facts_text, "explanations": explanations_text,
