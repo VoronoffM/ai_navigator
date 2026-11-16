@@ -25,6 +25,7 @@
   --soft: #d0d7e2;
   --muted: #aab6c5;
   --accent: #ffdd2d;
+  --accent-text: var(--accent);
   --accent-hover: #ffe66b;
   --accent-ink: #211b08;
   --accent-surface: #332d1b;
@@ -32,6 +33,8 @@
   --lavender: #c9bdf7;
   --lavender-surface: #2a253a;
   --navigator-glow: rgb(126 106 195 / 10%);
+  --chart-shadow: 0 10px 34px rgb(0 0 0 / 12%);
+  --navigator-shadow: 0 12px 42px rgb(0 0 0 / 24%);
   --negative: #f1a1af;
   --negative-surface: #372634;
   --blue: #afcff5;
@@ -40,6 +43,9 @@
   --green-surface: #213427;
   --gold: #e4c790;
   --gold-surface: #332b22;
+  --analysis-card-background: #1d2026;
+  --analysis-secondary: #191e26;
+  --analysis-border: #303641;
   --chart-grid: #242b35;
   --chart-cursor: #748395;
   --chart-label: #394759;
@@ -55,8 +61,48 @@
   --space-6: 24px;
   --space-8: 32px;
   --radius-control: 10px;
+  --radius-card: 14px;
   --radius-panel: 18px;
   --duration: 180ms;
   --shell-width: 1680px;
   --gutter: clamp(20px, 2.5vw, 40px);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --background: #f3f5f8;
+  --chart-background: #fff;
+  --surface: #fff;
+  --raised: #e0e5ec;
+  --inset: #e9edf3;
+  --line: #c7cfdb;
+  --text: #19202a;
+  --soft: #353f4e;
+  --muted: #536174;
+  --accent-text: #715600;
+  --accent-hover: #f5cb13;
+  --accent-surface: #fff3bd;
+  --accent-glow: rgb(212 158 0 / 15%);
+  --lavender: #594396;
+  --lavender-surface: #ede7fb;
+  --navigator-glow: rgb(126 106 195 / 8%);
+  --chart-shadow: 0 10px 34px rgb(25 32 42 / 7%);
+  --navigator-shadow: 0 12px 42px rgb(25 32 42 / 10%);
+  --negative: #a12c46;
+  --negative-surface: #fce7ed;
+  --blue: #245687;
+  --blue-surface: #e2edf9;
+  --green: #22663f;
+  --green-surface: #e3f2e8;
+  --gold: #775315;
+  --gold-surface: #f8edda;
+  --analysis-card-background: var(--surface);
+  --analysis-secondary: var(--surface);
+  --analysis-border: #dfe4eb;
+  --chart-grid: #e2e7ee;
+  --chart-cursor: #64748a;
+  --chart-label: #48576a;
+  --chart-price: #82651f;
+  --chart-up: #21764b;
+  --chart-down: #b7445d;
 }

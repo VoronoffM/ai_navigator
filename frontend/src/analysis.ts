@@ -1,10 +1,18 @@
 import { useEffect, useState } from 'react';
+import type { SourceAction } from './scenarios';
 
 export type CheckName = 'news' | 'market' | 'dividends' | 'reports';
-export type Profile = { provider?: 'ollama' | 'openai'; model?: string; checks?: CheckName[] };
+export type Profile = {
+  provider?: 'ollama' | 'cloud';
+  model?: string;
+  apiUrl?: string;
+  cloudModel?: string;
+  checks?: CheckName[];
+  workflow?: { actions: SourceAction[]; depth: 'brief' | 'detailed'; instructions: string };
+};
 export type AnalysisConfig = {
   models: string[];
-  openaiModel: string | null;
+  cloud: { apiUrl: string; model: string } | null;
   checks: Record<CheckName, string>;
   defaults: { model: string; checks: CheckName[] };
 };
@@ -30,11 +38,27 @@ type CheckResult<Facts = Record<string, never>> = {
 type Citation = Pick<Material, 'id' | 'title' | 'source' | 'url'>;
 export type Statement = { text: string; citations: Citation[] };
 type Job = { id: string; event_id: string };
-export type AnalysisResult = Job & {
+export type ScenarioDelivery = { run_id: string; scenario_id: string; name: string };
+type AnalysisActivity = {
+  telegram?: 'pending' | 'sent' | 'failed' | 'unconnected';
+  actions?: SourceAction[];
+  requestedChecks?: CheckName[];
+  completedChecks?: Partial<Record<CheckName, CheckStatus>>;
+  completedActions?: SourceAction[];
+  cbr?: CheckResult;
+};
+export type AnalysisResult = Job & AnalysisActivity & {
   status: 'done';
   llm: 'ready' | 'failed' | 'skipped';
   reason: string | null;
-  synthesis: { facts: Statement[]; hypotheses: Statement[]; questions: string[] } | null;
+  reportFormat?: 'brief' | 'detailed';
+  synthesis: {
+    summary?: string | null;
+    evidenceChecks?: (CheckName | 'cbr')[];
+    facts: Statement[];
+    hypotheses: Statement[];
+    questions: string[];
+  } | null;
   checks: {
     news: CheckResult;
     market: CheckResult<{ comparison?: { changePercent: number } }>;
@@ -48,8 +72,7 @@ export type AnalysisResult = Job & {
   };
 };
 
-type Collection = { status: 'collecting'; completedChecks?: Partial<Record<CheckName, CheckStatus>> };
-type InProgress = Collection | { status: 'analyzing' };
+type InProgress = AnalysisActivity & { status: 'collecting' | 'analyzing' };
 export type AnalysisState = AnalysisResult | InProgress | { status: 'error'; phase: InProgress['status']; reason: string };
 type JobResponse = AnalysisResult | (Job & InProgress);
 const storageKey = 'ai-navigator:analysis-profile';
@@ -58,8 +81,10 @@ export function readProfile(): Profile {
   try {
     const saved = JSON.parse(localStorage.getItem(storageKey) ?? '{}');
     return {
-      provider: saved?.provider === 'openai' ? 'openai' : 'ollama',
+      provider: saved?.provider === 'cloud' || saved?.provider === 'openai' ? 'cloud' : 'ollama',
       model: typeof saved?.model === 'string' ? saved.model : undefined,
+      apiUrl: typeof saved?.apiUrl === 'string' ? saved.apiUrl : undefined,
+      cloudModel: typeof saved?.cloudModel === 'string' ? saved.cloudModel : undefined,
       checks: Array.isArray(saved?.checks) ? saved.checks : undefined,
     };
   } catch {
@@ -70,8 +95,10 @@ export function readProfile(): Profile {
 export function normalizeProfile(profile: Profile, config?: AnalysisConfig): Profile {
   if (!config) return {};
   return {
-    provider: profile.provider === 'openai' && config.openaiModel ? 'openai' : 'ollama',
+    provider: profile.provider === 'cloud' && config.cloud ? 'cloud' : 'ollama',
     model: profile.model && config.models.includes(profile.model) ? profile.model : config.defaults.model,
+    apiUrl: profile.apiUrl ?? config.cloud?.apiUrl,
+    cloudModel: profile.cloudModel ?? config.cloud?.model,
     checks: profile.checks?.filter((name) => Object.hasOwn(config.checks, name)) ?? config.defaults.checks,
   };
 }
@@ -80,14 +107,19 @@ export function saveProfile(profile: Profile) {
   localStorage.setItem(storageKey, JSON.stringify(profile));
 }
 
-export function useAnalysis(eventId: string | undefined, profile: Profile, openaiKey: string): AnalysisState | null {
-  const [state, setState] = useState<{ eventId: string; profile: Profile; value: AnalysisState }>();
+export function useAnalysis(eventId: string | undefined, profile: Profile, apiKey: string,
+  telegram?: ScenarioDelivery): AnalysisState | null {
+  const [state, setState] = useState<{ eventId: string; profile: Profile; telegram?: ScenarioDelivery; value: AnalysisState }>();
   useEffect(() => {
     if (!eventId) return;
     const currentEventId = eventId;
     const controller = new AbortController();
     let timer: number | undefined;
     let phase: InProgress['status'] = 'collecting';
+    const deliveryQuery = telegram ? '?' + new URLSearchParams({
+      run_id: telegram.run_id, scenario_id: telegram.scenario_id,
+    }) : '';
+    let completed: AnalysisResult | undefined;
 
     async function request(path: string, init?: RequestInit) {
       try {
@@ -98,33 +130,45 @@ export function useAnalysis(eventId: string | undefined, profile: Profile, opena
         }
         const job: JobResponse = await response.json();
         if (controller.signal.aborted || job.event_id !== currentEventId) return;
-        setState({ eventId: currentEventId, profile, value: job });
-        if (job.status === 'collecting' || job.status === 'analyzing') {
-          phase = job.status;
-          timer = window.setTimeout(() => void request(`/api/analysis/jobs/${job.id}`), 650);
+        setState({ eventId: currentEventId, profile, telegram, value: job });
+        if (job.status === 'done') completed = job;
+        else phase = job.status;
+        if (job.status !== 'done' || job.telegram === 'pending') {
+          timer = window.setTimeout(() => void request(`/api/analysis/jobs/${job.id}${deliveryQuery}`), 650);
         }
       } catch (error) {
         if (!controller.signal.aborted) {
           const reason = error instanceof Error ? error.message : 'Сервер разбора недоступен.';
-          setState({ eventId: currentEventId, profile, value: { status: 'error', phase, reason } });
+          const value = completed ? { ...completed, telegram: 'failed' as const } : { status: 'error' as const, phase, reason };
+          setState({ eventId: currentEventId, profile, telegram, value });
         }
       }
     }
 
+    const cloud = profile.provider === 'cloud';
     void request(`/api/analysis/${encodeURIComponent(eventId)}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(profile.provider === 'openai' && openaiKey ? { Authorization: `Bearer ${openaiKey}` } : {}),
+        ...(cloud && apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
       },
-      body: JSON.stringify(profile.provider === 'openai' ? { ...profile, model: undefined } : profile),
+      body: JSON.stringify({
+        provider: profile.provider,
+        checks: profile.checks,
+        workflow: profile.workflow,
+        telegram,
+        model: cloud ? profile.cloudModel : profile.model,
+        apiUrl: cloud ? profile.apiUrl : undefined,
+      }),
     });
     return () => {
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [eventId, profile, openaiKey]);
+  }, [eventId, profile, apiKey, telegram]);
 
   if (!eventId) return null;
-  return state?.eventId === eventId && state.profile === profile ? state.value : { status: 'collecting' };
+  return state?.eventId === eventId && state.profile === profile && state.telegram === telegram ? state.value
+    : { status: 'collecting', actions: profile.workflow?.actions,
+      requestedChecks: profile.checks };
 }

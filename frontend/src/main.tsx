@@ -1,21 +1,29 @@
-import { StrictMode, useEffect, useState } from 'react';
+import { StrictMode, useEffect, useLayoutEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ChartCandlestick, ChevronDown, CircleAlert, Clock3, RefreshCw } from 'lucide-react';
+import { ChartCandlestick, CircleAlert, Clock3, RefreshCw } from 'lucide-react';
 import '@fontsource-variable/inter/wght.css';
 import { normalizeProfile, readProfile, saveProfile, type AnalysisConfig, type Profile } from './analysis';
 import { AgentStudio } from './AgentStudio';
 import { CandleIntervalControl } from './CandleIntervalControl';
 import { Chart } from './Chart';
 import { Navigator } from './Navigator';
+import { SpringDropdown } from './SpringDropdown';
+import { ThemeSwitch, readTheme, saveTheme } from './ThemeSwitch';
 import { WorkspaceNav } from './WorkspaceNav';
 import { storageKey } from './scenarios';
-import { loadStudio, studioSettingsKey } from './studioSettings';
+import { loadStudio, studioSettingsKey, type StudioState } from './studioSettings';
 import { marketTime, number, symbols, useMarketResource, type Candle, type Interval, type QuoteRow, type Ticker } from './market';
-import type { ReplayEpisode } from './replay';
+import { matchesReplayScenario, supportsReplayScenario, type ReplayEpisode } from './replay';
 import './style.css';
 import './studio.css';
 
+const modeOptions = [
+  { value: 'historical', label: 'Исторический режим' },
+  { value: 'live', label: 'Реальный режим (недоступен)', disabled: true },
+] as const;
+
 function Terminal() {
+  const [theme, setTheme] = useState(readTheme);
   const [section, setSection] = useState<'market' | 'studio'>('market');
   const [studio, setStudio] = useState(loadStudio);
   const [ticker, setTicker] = useState<Ticker>('GAZP');
@@ -24,9 +32,11 @@ function Terminal() {
   const [replayRevision, setReplayRevision] = useState(0);
   const [replayCount, setReplayCount] = useState<number | null>(null);
   const [savedProfile, setSavedProfile] = useState(readProfile);
-  const [openaiKey, setOpenaiKey] = useState('');
-  const [replaySettings, setReplaySettings] = useState<{ profile: Profile; openaiKey: string }>({
-    profile: {}, openaiKey: '',
+  const [apiKey, setApiKey] = useState('');
+  const [replaySettings, setReplaySettings] = useState<{
+    profile: Profile; apiKey: string; runId?: string; studio?: StudioState;
+  }>({
+    profile: {}, apiKey: '',
   });
   const configResource = useMarketResource<AnalysisConfig>('/api/analysis/config', 0, false);
   const config = configResource.status === 'ready' ? configResource.data : undefined;
@@ -46,10 +56,22 @@ function Terminal() {
   const bars = historical ? episode?.candles.slice(0, replayCount) ?? []
     : candles.status === 'ready' ? candles.data : [];
   const lastBar = bars[bars.length - 1];
-  const event = historical && episode?.event && lastBar?.time >= episode.event.candleTime ? episode.event : null;
+  const replayStudio = replaySettings.studio;
+  const eligible = replayStudio?.scenarios.filter((scenario) => supportsReplayScenario(scenario)
+    && replayStudio.settings.agents.some((agent) => agent.id === scenario.agentId));
+  const candidate = eligible?.length && episode?.frames
+    ? episode.frames.find((frame) => eligible.some((scenario) => matchesReplayScenario(scenario, frame)))
+    : episode?.event;
+  const event = historical && candidate && lastBar?.time >= candidate.candleTime ? candidate : null;
   const replayIssue = replayResource.status === 'error' ? replayResource.issue.message : null;
   const headerPrice = historical ? lastBar?.close : selectedQuote?.quote?.price;
   const loading = quotes.status === 'loading' || candles.status === 'loading';
+
+  useLayoutEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    const color = getComputedStyle(document.documentElement).getPropertyValue('--background').trim();
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', color);
+  }, [theme]);
 
   useEffect(() => {
     function sync(event: StorageEvent) {
@@ -68,7 +90,9 @@ function Terminal() {
   function playReplay() {
     if (episode) {
       const profile = normalizeProfile(savedProfile, config);
-      setReplaySettings({ profile, openaiKey: profile.provider === 'openai' ? openaiKey.trim() : '' });
+      setReplaySettings({
+        profile, apiKey: profile.provider === 'cloud' ? apiKey.trim() : '', runId: crypto.randomUUID(), studio,
+      });
       setReplayCount(episode.warmupCount);
     } else setReplayRevision((value) => value + 1);
   }
@@ -92,18 +116,20 @@ function Terminal() {
             <span>AI Штурман</span>
           </div>
           <WorkspaceNav section={section} onChange={setSection} />
-          <div className="topbar-actions" hidden={section !== 'market'}>
-            <div className="mode-picker">
-              <select aria-label="Режим работы" defaultValue="historical">
-                <option value="historical">Исторический режим</option>
-                <option value="live" disabled>Реальный режим (недоступен)</option>
-              </select>
-              <ChevronDown size={15} aria-hidden="true" />
+          <div className="topbar-actions">
+            <div className="market-actions" hidden={section !== 'market'}>
+              <div className="mode-picker">
+                <SpringDropdown floating label="Режим работы" options={modeOptions} value="historical" />
+              </div>
+              {!historical && <button className="icon-button" aria-label="Обновить рыночные данные" title="Обновить рыночные данные"
+                type="button" disabled={loading} onClick={refresh}>
+                <RefreshCw size={16} className={loading ? 'rotating' : undefined} aria-hidden="true" />
+              </button>}
             </div>
-            {!historical && <button className="icon-button" aria-label="Обновить рыночные данные" title="Обновить рыночные данные"
-              type="button" disabled={loading} onClick={refresh}>
-              <RefreshCw size={16} className={loading ? 'rotating' : undefined} aria-hidden="true" />
-            </button>}
+            <ThemeSwitch theme={theme} onChange={(nextTheme) => {
+              setTheme(nextTheme);
+              saveTheme(nextTheme);
+            }} />
           </div>
         </div>
       </header>
@@ -159,7 +185,7 @@ function Terminal() {
               <CandleIntervalControl value={shownInterval} disabled={historical} onChange={setInterval} />
             </div>
             {lastBar ? (
-              <Chart key={historical ? 'replay:gazprom' : `${ticker}:${interval}`} candles={bars} interval={shownInterval} />
+              <Chart key={historical ? 'replay:gazprom' : `${ticker}:${interval}`} candles={bars} interval={shownInterval} theme={theme} />
             ) : (
               <div className="chart-state" role="status">
                 <div className="chart-state-content">
@@ -182,10 +208,10 @@ function Terminal() {
           </div>
         </section>
 
-        <Navigator event={event} profile={replaySettings.profile} openaiKey={replaySettings.openaiKey}
+        <Navigator event={event} profile={replaySettings.profile} apiKey={replaySettings.apiKey} runId={replaySettings.runId}
           running={replayRunning} replay={historical}
-          loading={replayResource.status === 'loading'} issue={replayIssue} threshold={episode?.thresholdPercent}
-          studio={studio} onOpenStudio={() => {
+          loading={replayResource.status === 'loading'} issue={replayIssue}
+          studio={studio} replayStudio={replayStudio} onOpenStudio={() => {
             setSection('studio');
             requestAnimationFrame(() => document.getElementById('studio-title')?.focus());
           }}
@@ -193,10 +219,10 @@ function Terminal() {
       </main>
       <AgentStudio visible={section === 'studio'} studio={studio} setStudio={setStudio} analysisConfig={config}
         analysisConfigFailed={configResource.status === 'error'} profile={normalizeProfile(savedProfile, config)}
-        openaiKey={openaiKey} onOpenaiKeyChange={setOpenaiKey}
+        apiKey={apiKey} onApiKeyChange={setApiKey}
         onProfileChange={(profile) => {
-          setSavedProfile(profile);
           saveProfile(profile);
+          setSavedProfile(profile);
         }} />
     </>
   );

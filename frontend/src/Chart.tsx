@@ -4,12 +4,13 @@ import {
   type IChartApi, type ISeriesApi, type Time,
 } from 'lightweight-charts';
 import { type Candle, type Interval, number } from './market';
+import type { Theme } from './ThemeSwitch';
 
 const axisDate = new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow', day: 'numeric', month: 'short' });
 const axisTime = new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow', hour: '2-digit', minute: '2-digit' });
 const axisMonth = new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow', month: 'short' });
 
-export function Chart({ candles, interval }: { candles: Candle[]; interval: Interval }) {
+export function Chart({ candles, interval, theme }: { candles: Candle[]; interval: Interval; theme: Theme }) {
   const container = useRef<HTMLDivElement>(null);
   const chart = useRef<IChartApi | null>(null);
   const series = useRef<ISeriesApi<'Candlestick'> | null>(null);
@@ -21,25 +22,16 @@ export function Chart({ candles, interval }: { candles: Candle[]; interval: Inte
   useEffect(() => {
     if (!container.current) return;
     const style = getComputedStyle(container.current);
-    const color = (name: string) => style.getPropertyValue(name).trim();
-    const grid = { color: color('--chart-grid') };
-    const crosshair = { color: color('--chart-cursor'), labelBackgroundColor: color('--chart-label') };
     const fontSize = Number.parseFloat(style.fontSize);
     const api = createChart(container.current, {
       autoSize: true,
       layout: {
-        background: { type: ColorType.Solid, color: color('--chart-background') },
-        textColor: color('--muted'),
         fontFamily: style.fontFamily,
         fontSize,
         attributionLogo: true,
       },
-      grid: { vertLines: { visible: false }, horzLines: grid },
-      crosshair: {
-        mode: CrosshairMode.Normal,
-        vertLine: crosshair,
-        horzLine: crosshair,
-      },
+      grid: { vertLines: { visible: false } },
+      crosshair: { mode: CrosshairMode.Normal },
       rightPriceScale: {
         borderVisible: false,
         entireTextOnly: true,
@@ -69,16 +61,7 @@ export function Chart({ candles, interval }: { candles: Candle[]; interval: Inte
         },
       },
     });
-    const up = color('--chart-up');
-    const down = color('--chart-down');
-    const candleSeries = api.addSeries(CandlestickSeries, {
-      upColor: up,
-      downColor: down,
-      borderVisible: false,
-      wickUpColor: up,
-      wickDownColor: down,
-      priceLineColor: color('--chart-price'),
-    });
+    const candleSeries = api.addSeries(CandlestickSeries, { borderVisible: false });
     api.subscribeCrosshairMove((event) => setHoverTime(event.time));
     chart.current = api;
     series.current = candleSeries;
@@ -89,6 +72,31 @@ export function Chart({ candles, interval }: { candles: Candle[]; interval: Inte
       hasData.current = false;
     };
   }, [interval]);
+
+  useEffect(() => {
+    if (!container.current) return;
+    const style = getComputedStyle(container.current);
+    const color = (name: string) => style.getPropertyValue(name).trim();
+    const crosshair = { color: color('--chart-cursor'), labelBackgroundColor: color('--chart-label') };
+
+    chart.current?.applyOptions({
+      layout: {
+        background: { type: ColorType.Solid, color: color('--chart-background') },
+        textColor: color('--muted'),
+      },
+      grid: { horzLines: { color: color('--chart-grid') } },
+      crosshair: { vertLine: crosshair, horzLine: crosshair },
+    });
+    const up = color('--chart-up');
+    const down = color('--chart-down');
+    series.current?.applyOptions({
+      upColor: up,
+      downColor: down,
+      wickUpColor: up,
+      wickDownColor: down,
+      priceLineColor: color('--chart-price'),
+    });
+  }, [interval, theme]);
 
   useEffect(() => {
     series.current?.setData(candles);

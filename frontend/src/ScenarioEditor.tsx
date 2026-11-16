@@ -1,19 +1,36 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowLeft, ArrowRight, Check } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, GripVertical, LockKeyhole, Plus, X } from 'lucide-react';
 import { symbols, type Ticker } from './market';
-import { defaultScenarioChecks, draftFrom, scenarioChecks, scenarioNotifications, templates, type ScenarioSettings, type Trigger } from './scenarios';
+import {
+  cbrCalendarUrl, defaultScenarioChecks, draftFrom, isPilotTrigger, pilotTriggers, reportFormats, scenarioActions, scenarioChecks,
+  scenarioNotifications, templates,
+  type ScenarioSettings, type SourceAction,
+} from './scenarios';
 import { ScenarioProgress } from './ScenarioProgress';
-import type { ExtraIntegration, StudioAgent } from './studioSettings';
+import { SpringDropdown } from './SpringDropdown';
+import type { StudioAgent } from './studioSettings';
 
-const triggers = Object.keys(templates) as Trigger[];
 const allAssets = symbols.map(({ ticker }) => ticker);
 const steps = [
   { label: 'Активы', title: 'Выберите активы' },
   { label: 'Сигнал', title: 'Настройте модель срабатывания сигнала' },
-  { label: 'Действия', title: 'Выберите действия агента' },
-  { label: 'Агент', title: 'Назначьте агента и канал уведомлений' },
+  { label: 'Агент и действия', title: 'Агент и действия' },
 ] as const;
 const stepLabels = steps.map(({ label }) => label);
+const priceDirections = [
+  { value: 'either', label: 'Рост или падение' },
+  { value: 'up', label: 'Только рост' },
+  { value: 'down', label: 'Только падение' },
+] as const;
+const relativeDirections = [
+  { value: 'either', label: 'Выше или ниже индекса' },
+  { value: 'up', label: 'Выше индекса' },
+  { value: 'down', label: 'Ниже индекса' },
+] as const;
+const reportOptions = (Object.keys(reportFormats) as ScenarioSettings['depth'][])
+  .map((value) => ({ value, label: reportFormats[value] }));
+const notificationOptions = (Object.keys(scenarioNotifications) as ScenarioSettings['notification'][])
+  .map((value) => ({ value, label: scenarioNotifications[value] }));
 
 export function ScenarioAssets({ assets, onChange }: { assets: Ticker[]; onChange: (assets: Ticker[]) => void }) {
   const allSelected = allAssets.every((ticker) => assets.includes(ticker));
@@ -41,16 +58,42 @@ export function ScenarioAssets({ assets, onChange }: { assets: Ticker[]; onChang
   );
 }
 
-export function ScenarioEditor({ initial, agents, integrations, onSave, onCancel }: {
-  initial: ScenarioSettings; agents: StudioAgent[]; integrations: ExtraIntegration[];
+export function ScenarioEditor({ initial, agents, onSave, onCancel }: {
+  initial: ScenarioSettings; agents: StudioAgent[];
   onSave: (settings: ScenarioSettings) => void; onCancel: () => void;
 }) {
   const [draft, setDraft] = useState(initial);
+  const agentOptions = useMemo(() => [
+    { value: '', label: 'Выберите агента' },
+    ...agents.map(({ id, name }) => ({ value: id, label: name })),
+  ], [agents]);
+  const selectedAgent = agents.find(({ id }) => id === draft.agentId)?.id ?? '';
+  const [triggerOptions] = useState(() =>
+    (isPilotTrigger(initial.trigger) ? pilotTriggers : [...pilotTriggers, initial.trigger])
+      .map((value) => ({ value, label: templates[value].title })),
+  );
   const [step, setStep] = useState(0);
   const [error, setError] = useState('');
   const stepHeading = useRef<HTMLHeadingElement>(null);
   const checks = draft.checks ?? defaultScenarioChecks;
-  const integrationIds = draft.integrationIds ?? [];
+  const actions = draft.actions ?? ['mcp'];
+  const [dragging, setDragging] = useState<SourceAction>();
+  const [dropTarget, setDropTarget] = useState<SourceAction>();
+  const [showActions, setShowActions] = useState(false);
+  const availableActions = (Object.keys(scenarioActions) as SourceAction[]).filter((action) => !actions.includes(action));
+  const pilot = isPilotTrigger(draft.trigger);
+  const relative = draft.trigger === 'relative';
+  const directionLabel = relative ? 'Динамика относительно IMOEX' : 'Направление цены';
+  const volume = draft.trigger === 'volume-spike' || draft.trigger === 'volume';
+  const thresholdLabel = {
+    'price-z': 'Порог необычности (Z-score)',
+    'volume-spike': 'Объём выше обычного, раз',
+    relative: 'Порог расхождения (Z-score)',
+    volume: 'Объём к среднему, раз',
+    volatility: 'Размах цены, %',
+    price: 'Изменение цены, %',
+    news: '',
+  }[draft.trigger];
 
   useEffect(() => {
     stepHeading.current?.focus({ preventScroll: true });
@@ -60,6 +103,19 @@ export function ScenarioEditor({ initial, agents, integrations, onSave, onCancel
   function update(change: Partial<ScenarioSettings>) {
     setDraft((current) => ({ ...current, ...change }));
     setError('');
+  }
+
+  function moveAction(from: SourceAction, to: SourceAction) {
+    if (from === to) return;
+    const reordered = [...actions];
+    reordered.splice(reordered.indexOf(from), 1);
+    reordered.splice(actions.indexOf(to), 0, from);
+    update({ actions: reordered });
+  }
+
+  function endDrag() {
+    setDragging(undefined);
+    setDropTarget(undefined);
   }
 
   function next(event: FormEvent<HTMLFormElement>) {
@@ -72,7 +128,18 @@ export function ScenarioEditor({ initial, agents, integrations, onSave, onCancel
       setStep(step + 1);
       return;
     }
-    onSave({ ...draft, checks, name: draft.name.trim(), keywords: draft.keywords.trim(), instructions: draft.instructions.trim() });
+    if (!agents.some((agent) => agent.id === draft.agentId)) {
+      setError('Выберите агента для сценария.');
+      return;
+    }
+    if (actions.length === 0 || (actions.includes('mcp') && checks.length === 0)) {
+      setError(actions.length === 0 ? 'Добавьте хотя бы одну проверку.' : 'Выберите хотя бы один инструмент T-Invest MCP.');
+      return;
+    }
+    onSave({
+      ...draft, actions, checks,
+      name: draft.name.trim(), keywords: draft.keywords.trim(), instructions: draft.instructions.trim(),
+    });
   }
 
   return (
@@ -92,21 +159,18 @@ export function ScenarioEditor({ initial, agents, integrations, onSave, onCancel
         )}
         {step === 1 && (
           <>
-            <div className="studio-field">
-              <select aria-labelledby="scenario-step-title" value={draft.trigger} onChange={(event) => {
-                const trigger = event.target.value as Trigger;
-                const { threshold, windowMinutes } = draftFrom(trigger);
-                update({ trigger, threshold, windowMinutes });
-              }}>
-                {triggers.map((trigger) => <option value={trigger} key={trigger}>{templates[trigger].title}</option>)}
-              </select>
-            </div>
-            {draft.trigger === 'price' && (
-              <label className="studio-field">Направление цены
-                <select value={draft.direction} onChange={(event) => update({ direction: event.target.value as ScenarioSettings['direction'] })}>
-                  <option value="either">Рост или падение</option><option value="up">Только рост</option><option value="down">Только падение</option>
-                </select>
-              </label>
+            <SpringDropdown floating label="Модель сигнала" preserveDialogPosition
+              options={triggerOptions} value={draft.trigger} onChange={(trigger) => {
+              const { threshold, windowMinutes } = draftFrom(trigger);
+              update({ trigger, threshold, windowMinutes });
+            }} />
+            {pilot && <p className="signal-description">{templates[draft.trigger].description}</p>}
+            {(draft.trigger === 'price' || draft.trigger === 'price-z' || relative) && (
+              <div className="studio-field">
+                <span>{directionLabel}</span>
+                <SpringDropdown floating label={directionLabel} options={relative ? relativeDirections : priceDirections}
+                  value={draft.direction} onChange={(direction) => update({ direction })} />
+              </div>
             )}
             {draft.trigger === 'news' ? (
               <label className="studio-field">Ключевые слова через запятую
@@ -115,12 +179,12 @@ export function ScenarioEditor({ initial, agents, integrations, onSave, onCancel
               </label>
             ) : (
               <div className="studio-fields">
-                <label className="studio-field">{draft.trigger === 'volume' ? 'Объём к среднему, раз' : draft.trigger === 'volatility' ? 'Размах цены, %' : 'Изменение цены, %'}
-                  <input type="number" required min={draft.trigger === 'volume' ? 1.01 : 0.01} step="0.01" value={draft.threshold || ''}
+                <label className="studio-field">{thresholdLabel}
+                  <input type="number" required min={volume ? 1.01 : 0.01} step="0.01" value={draft.threshold || ''}
                     onChange={(event) => update({ threshold: Number(event.target.value) })} />
                 </label>
                 <label className="studio-field">Период, мин
-                  <input type="number" required min={1} step={1} value={draft.windowMinutes || ''}
+                  <input type="number" required min={1} step={1} readOnly={pilot} value={draft.windowMinutes || ''}
                     onChange={(event) => update({ windowMinutes: Number(event.target.value) })} />
                 </label>
               </div>
@@ -133,67 +197,109 @@ export function ScenarioEditor({ initial, agents, integrations, onSave, onCancel
         )}
         {step === 2 && (
           <>
-            <fieldset className="studio-assets">
-              <legend>Инструменты T-Invest MCP</legend>
-              <div className="studio-asset-options">
-                {defaultScenarioChecks.map((check) => (
-                  <label className="watch-chip" key={check}>
-                    <input type="checkbox" checked={checks.includes(check)} onChange={() => update({
-                      checks: checks.includes(check) ? checks.filter((item) => item !== check) : [...checks, check],
-                    })} />
-                    <span className="checkbox" aria-hidden="true"><Check size={11} strokeWidth={2.5} /></span>
-                    {scenarioChecks[check]}
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-            <fieldset className="studio-assets studio-extra-sources">
-              <legend>Другие интеграции</legend>
-              {integrations.length === 0 ? (
-                <p>Добавьте источник в разделе «Интеграции», чтобы выбрать его здесь.</p>
-              ) : (
-                <>
-                  <div className="studio-asset-options">
-                    {integrations.map(({ id, name }) => (
-                      <label className="watch-chip" key={id}>
-                        <input type="checkbox" checked={integrationIds.includes(id)} onChange={() => update({
-                          integrationIds: integrationIds.includes(id)
-                            ? integrationIds.filter((item) => item !== id) : [...integrationIds, id],
-                        })} />
-                        <span className="checkbox" aria-hidden="true"><Check size={11} strokeWidth={2.5} /></span>
-                        <span>{name}</span>
-                      </label>
-                    ))}
-                  </div>
-                  <p>Подключения пока сохраняются как черновики.</p>
-                </>
-              )}
-            </fieldset>
-            <label className="studio-field">Глубина разбора
-              <select value={draft.depth} onChange={(event) => update({ depth: event.target.value as ScenarioSettings['depth'] })}>
-                <option value="brief">Краткая сводка</option>
-                <option value="detailed">Подробный разбор</option>
-              </select>
-            </label>
-            <label className="studio-field">Инструкции для AI
-              <textarea value={draft.instructions} rows={4} maxLength={1000} placeholder="Что важно проверить в первую очередь?"
-                onChange={(event) => update({ instructions: event.target.value })} />
-            </label>
-          </>
-        )}
-        {step === 3 && (
-          <>
-            <label className="studio-field">Назначить агенту
-              <select value={draft.agentId ?? ''} onChange={(event) => update({ agentId: event.target.value || undefined })}>
-                <option value="">Без агента</option>
-                {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
-              </select>
-            </label>
-            <label className="studio-field">Канал уведомлений
-              <select value={draft.notification} onChange={(event) => update({ notification: event.target.value as ScenarioSettings['notification'] })}>
-                {Object.entries(scenarioNotifications).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-              </select>
-            </label>
+            <div className="studio-field">
+              <span>Агент</span>
+              <SpringDropdown floating label="Агент" options={agentOptions} value={selectedAgent}
+                onChange={(agentId) => update({ agentId: agentId || undefined })} />
+            </div>
+            {agents.length === 0 && <p>Создайте агента в Agent Studio, затем вернитесь к сценарию.</p>}
+            <ol className="studio-workflow" role="list" aria-label="Порядок действий">
+              {actions.map((action, index) => {
+                const neighbor = actions[index === 0 ? 1 : index - 1];
+                const MoveIcon = index === 0 ? ArrowDown : ArrowUp;
+                return <li className="studio-workflow-card" key={action} data-drop-target={dropTarget === action}
+                  onDragOver={(event) => {
+                    if (!dragging || dragging === action) return;
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = 'move';
+                    setDropTarget(action);
+                  }}
+                  onDragLeave={(event) => {
+                    if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) {
+                      setDropTarget((current) => current === action ? undefined : current);
+                    }
+                  }}
+                  onDrop={(event) => {
+                    if (!dragging) return;
+                    event.preventDefault();
+                    moveAction(dragging, action);
+                    endDrag();
+                  }}>
+                  <header>
+                    <span className="studio-workflow-index">{index + 1}</span>
+                    <h4>{scenarioActions[action]}</h4>
+                    {neighbor && <button className="studio-workflow-icon studio-workflow-handle" type="button" draggable
+                      title={index === 0 ? 'Переместить ниже' : 'Переместить выше'}
+                      aria-label={`${index === 0 ? 'Переместить ниже' : 'Переместить выше'}: ${scenarioActions[action]}`}
+                      onClick={() => moveAction(action, neighbor)}
+                      onDragStart={(event) => {
+                        event.dataTransfer.setData('text/plain', action);
+                        event.dataTransfer.effectAllowed = 'move';
+                        setDragging(action);
+                      }}
+                      onDragEnd={endDrag}>
+                      <GripVertical size={17} aria-hidden="true" /><MoveIcon size={13} aria-hidden="true" />
+                    </button>}
+                    <button className="studio-workflow-icon" type="button" title="Убрать проверку"
+                      aria-label={`Убрать проверку: ${scenarioActions[action]}`}
+                      onClick={() => update({ actions: actions.filter((item) => item !== action) })}>
+                      <X size={16} aria-hidden="true" />
+                    </button>
+                  </header>
+                  {action === 'mcp' ? (
+                    <fieldset className="studio-assets" aria-label="Инструменты T-Invest MCP">
+                      <div className="studio-asset-options">
+                        {defaultScenarioChecks.map((check) => (
+                          <label className="watch-chip" key={check}>
+                            <input type="checkbox" checked={checks.includes(check)} onChange={() => update({
+                              checks: checks.includes(check) ? checks.filter((item) => item !== check) : [...checks, check],
+                            })} />
+                            <span className="checkbox" aria-hidden="true"><Check size={11} strokeWidth={2.5} /></span>
+                            {scenarioChecks[check]}
+                          </label>
+                        ))}
+                      </div>
+                    </fieldset>
+                  ) : (
+                    <a href={cbrCalendarUrl} target="_blank" rel="noopener noreferrer">Календарь решений по ключевой ставке</a>
+                  )}
+                </li>;
+              })}
+              {availableActions.length > 0 && <li className="studio-workflow-add" role="presentation">
+                  <button className="studio-workflow-add-button" type="button" aria-expanded={showActions}
+                    onClick={() => setShowActions(!showActions)}>
+                    <Plus size={16} aria-hidden="true" /> Добавить действие
+                  </button>
+                  {showActions && <div className="studio-workflow-options">
+                    {availableActions.map((action) => <button type="button" key={action} onClick={() => {
+                      update({ actions: [...actions, action] });
+                      setShowActions(false);
+                    }}>{scenarioActions[action]}</button>)}
+                  </div>}
+              </li>}
+              <li className="studio-workflow-card studio-workflow-report">
+                <header>
+                  <span className="studio-workflow-index">{actions.length + 1}</span>
+                  <h4>Отчёт в AI Штурмане</h4>
+                  <LockKeyhole size={16} aria-label="Всегда последний" role="img" />
+                </header>
+                <div className="studio-field">
+                  <span>Формат отчёта</span>
+                  <SpringDropdown floating label="Формат отчёта" options={reportOptions}
+                    value={draft.depth} onChange={(depth) => update({ depth })} />
+                </div>
+                <div className="studio-field">
+                  <span>Уведомления</span>
+                  <SpringDropdown floating label="Уведомления" options={notificationOptions}
+                    value={draft.notification} onChange={(notification) => update({ notification })} />
+                </div>
+                <label className="studio-field">На чём сделать акцент
+                  <textarea value={draft.instructions} rows={2} maxLength={1000}
+                    placeholder="Например, сравни движение бумаги с IMOEX"
+                    onChange={(event) => update({ instructions: event.target.value })} />
+                </label>
+              </li>
+            </ol>
           </>
         )}
         {error && <p className="studio-error" role="alert">{error}</p>}

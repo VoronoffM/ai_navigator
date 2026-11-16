@@ -9,6 +9,10 @@ export const scenarioChecks = {
 } satisfies Record<CheckName, string>;
 
 export const defaultScenarioChecks = Object.keys(scenarioChecks) as CheckName[];
+export const scenarioActions = { mcp: 'T-Invest MCP', cbr: 'Проверить сайт ЦБ' } as const;
+export const cbrCalendarUrl = 'https://www.cbr.ru/dkp/cal_mp/';
+export const reportFormats = { brief: 'Краткая сводка', detailed: 'Подробный разбор' } as const;
+export type SourceAction = keyof typeof scenarioActions;
 export const scenarioNotifications = {
   'in-app': 'В AI Штурман',
   telegram: 'Telegram',
@@ -16,8 +20,23 @@ export const scenarioNotifications = {
 } as const;
 
 export const templates = {
-  price: {
+  'price-z': {
     title: 'Аномальное изменение цены',
+    description: 'Сравнивает часовое движение с обычными колебаниями бумаги (Z-score с EWMA).',
+    instructions: 'Проверь новости и динамику рынка. Отдели подтверждённые факты от возможных причин.',
+  },
+  'volume-spike': {
+    title: 'Всплеск объёма торгов',
+    description: 'Сравнивает объём с медианой за тот же час предыдущих торговых дней.',
+    instructions: 'Сопоставь всплеск объёма с изменением цены и новостями об эмитенте.',
+  },
+  relative: {
+    title: 'Расхождение с рынком',
+    description: 'Сравнивает движение бумаги с IMOEX за тот же час и оценивает, насколько необычна разница.',
+    instructions: 'Покажи изменения бумаги и IMOEX за один период и разницу между ними.',
+  },
+  price: {
+    title: 'Изменение цены по фиксированному порогу',
     description: 'Резкий рост или падение котировки за выбранный период.',
     instructions: 'Проверь новости и динамику рынка. Отдели подтверждённые факты от возможных причин.',
   },
@@ -39,6 +58,11 @@ export const templates = {
 } as const;
 
 export type Trigger = keyof typeof templates;
+export const pilotTriggers = ['price-z', 'volume-spike', 'relative'] as const;
+
+export function isPilotTrigger(trigger: Trigger) {
+  return pilotTriggers.some((item) => item === trigger);
+}
 export type ScenarioSettings = {
   name: string;
   agentId?: string;
@@ -51,6 +75,7 @@ export type ScenarioSettings = {
   depth: 'brief' | 'detailed';
   instructions: string;
   checks?: CheckName[];
+  actions?: SourceAction[];
   integrationIds?: string[];
   notification: keyof typeof scenarioNotifications;
 };
@@ -59,14 +84,14 @@ export type Scenario = ScenarioSettings & { id: string; enabled: boolean };
 export const storageKey = 'ai-navigator.scenarios.v1';
 const decimal = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 });
 
-export function draftFrom(trigger: Trigger = 'price', fromTemplate = false): ScenarioSettings {
+export function draftFrom(trigger: Trigger = 'price-z', fromTemplate = false): ScenarioSettings {
   const template = templates[trigger];
   return {
     name: fromTemplate ? template.title : '',
     assets: [],
     trigger,
     direction: 'either',
-    threshold: 2,
+    threshold: trigger === 'price-z' || trigger === 'relative' ? 2.5 : 2,
     windowMinutes: 60,
     keywords: '',
     depth: 'brief',
@@ -76,16 +101,27 @@ export function draftFrom(trigger: Trigger = 'price', fromTemplate = false): Sce
   };
 }
 
-export function describeTrigger(scenario: ScenarioSettings) {
+export function describeTriggerCondition(scenario: ScenarioSettings) {
   if (scenario.trigger === 'news') {
     return scenario.keywords ? `Новости · ${scenario.keywords}` : 'Новости об эмитенте';
   }
   const threshold = decimal.format(scenario.threshold);
-  const window = `${scenario.windowMinutes} мин`;
-  if (scenario.trigger === 'volume') return `Объём от ${threshold}× среднего · ${window}`;
-  if (scenario.trigger === 'volatility') return `Размах цены от ${threshold}% · ${window}`;
+  if (scenario.trigger === 'volume-spike') return `Объём от ${threshold}× обычного`;
+  if (scenario.trigger === 'price-z' || scenario.trigger === 'relative') {
+    const labels = scenario.trigger === 'price-z'
+      ? { either: 'Изменение цены', up: 'Рост цены', down: 'Падение цены' }
+      : { either: 'Расхождение с IMOEX', up: 'Выше IMOEX', down: 'Ниже IMOEX' };
+    return `${labels[scenario.direction]} · от ${threshold}σ`;
+  }
+  if (scenario.trigger === 'volume') return `Объём от ${threshold}× среднего`;
+  if (scenario.trigger === 'volatility') return `Размах цены от ${threshold}%`;
   const direction = { either: 'Изменение цены', up: 'Рост цены', down: 'Падение цены' };
-  return `${direction[scenario.direction]} от ${threshold}% · ${window}`;
+  return `${direction[scenario.direction]} от ${threshold}%`;
+}
+
+export function describeTrigger(scenario: ScenarioSettings) {
+  const condition = describeTriggerCondition(scenario);
+  return scenario.trigger === 'news' ? condition : `${condition} · ${scenario.windowMinutes} мин`;
 }
 
 function isScenario(value: unknown): value is Scenario {
@@ -103,6 +139,9 @@ function isScenario(value: unknown): value is Scenario {
     && typeof item.keywords === 'string' && typeof item.instructions === 'string'
     && (item.depth === 'brief' || item.depth === 'detailed')
     && (item.checks === undefined || (Array.isArray(item.checks) && item.checks.every((check) => defaultScenarioChecks.includes(check))))
+    && (item.actions === undefined || (Array.isArray(item.actions) && item.actions.length > 0
+      && new Set(item.actions).size === item.actions.length
+      && item.actions.every((action) => Object.hasOwn(scenarioActions, action))))
     && (item.integrationIds === undefined || (Array.isArray(item.integrationIds) && item.integrationIds.every((id) => typeof id === 'string')))
     && typeof item.notification === 'string' && Object.hasOwn(scenarioNotifications, item.notification);
 }

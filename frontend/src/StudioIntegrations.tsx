@@ -1,12 +1,69 @@
 import { useState, type FormEvent } from 'react';
-import { Check, Send } from 'lucide-react';
+import { CalendarDays, CandlestickChart, ExternalLink, History, Newspaper, Percent, Send } from 'lucide-react';
 import type { AnalysisConfig, CheckName, Profile } from './analysis';
+import { defaultScenarioChecks, scenarioChecks } from './scenarios';
 import type { ExtraIntegration } from './studioSettings';
+
+const investTools = {
+  news: {
+    icon: Newspaper,
+    name: 'invest_get_news',
+    description: 'Ищет публикации по бумаге, вышедшие к моменту сигнала.',
+  },
+  market: {
+    icon: CandlestickChart,
+    name: 'invest_get_candles',
+    description: 'Загружает свечи за нужный период. Агент сравнивает движение бумаги с индексом IMOEX.',
+  },
+  dividends: {
+    icon: Percent,
+    name: 'invest_get_share_dividends',
+    description: 'Проверяет, есть ли рядом с сигналом записи о дивидендах, и показывает суммы и ключевые даты.',
+  },
+  reports: {
+    icon: CalendarDays,
+    name: 'invest_get_instrument_reports',
+    description: 'Проверяет по календарю, был ли на день сигнала запланирован выход отчётности.',
+  },
+} satisfies Record<CheckName, { icon: typeof Newspaper; name: string; description: string }>;
+
+export function InvestMcpDetails() {
+  return (
+    <div className="studio-mcp">
+      <p className="studio-dialog-copy">Выберите в настройках сценария, какие данные агент будет проверять при разборе сигнала.</p>
+      <ul className="studio-mcp-tools" role="list">
+        {defaultScenarioChecks.map((check) => {
+          const { icon: Icon, name, description } = investTools[check];
+          return (
+            <li key={check}>
+              <span className="studio-icon"><Icon size={18} aria-hidden="true" /></span>
+              <div>
+                <h3>{scenarioChecks[check]}</h3>
+                <code>{name}</code>
+                <p>{description}</p>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      <div className="studio-mcp-demo">
+        <History size={18} aria-hidden="true" />
+        <div>
+          <h3>Демо на сохранённых данных</h3>
+          <p>Пока разбор воспроизводит заранее сохранённый эпизод с «Газпромом». Дальше агент будет запрашивать данные через T-Invest MCP.</p>
+        </div>
+      </div>
+      <a className="studio-mcp-docs" href="https://developer.tbank.ru/invest/mcp" target="_blank" rel="noreferrer">
+        Документация T-Invest MCP <ExternalLink size={14} aria-hidden="true" />
+      </a>
+    </div>
+  );
+}
 
 export function ProviderSettings({ config, failed, provider, profile, apiKey, onProfileChange, onKeyChange, onClose }: {
   config?: AnalysisConfig;
   failed: boolean;
-  provider: 'openai' | 'ollama';
+  provider: 'cloud' | 'ollama';
   profile: Profile;
   apiKey: string;
   onProfileChange: (profile: Profile) => void;
@@ -17,16 +74,34 @@ export function ProviderSettings({ config, failed, provider, profile, apiKey, on
   const [key, setKey] = useState(apiKey);
   const [error, setError] = useState('');
   const [selected, setSelected] = useState(profile.provider === provider);
-  const api = provider === 'openai';
+  const api = provider === 'cloud';
 
   if (!config) return <p className="studio-dialog-copy" role="status">{failed ? 'Настройки сервера недоступны.' : 'Загружаем настройки…'}</p>;
-  if (api && !config.openaiModel) return <p className="studio-dialog-copy">На сервере не настроена модель OpenAI.</p>;
+  if (api && !config.cloud) return <p className="studio-dialog-copy">Облачный API недоступен на сервере.</p>;
 
   function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const apiUrl = draft.apiUrl?.trim();
+    const cloudModel = draft.cloudModel?.trim();
+    const trimmedKey = key.trim();
+    if (api) {
+      const url = apiUrl && URL.canParse(apiUrl) ? new URL(apiUrl) : null;
+      if (!url || url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) {
+        setError('Укажите публичный HTTPS-адрес API без логина, параметров и фрагмента.');
+        return;
+      }
+      if (!cloudModel) {
+        setError('Укажите идентификатор модели.');
+        return;
+      }
+      if (trimmedKey && !/^[!-~]+$/.test(trimmedKey)) {
+        setError('Проверьте формат API-ключа.');
+        return;
+      }
+    }
     try {
-      onProfileChange({ ...draft, provider: selected ? provider : api ? 'ollama' : 'openai' });
-      if (api) onKeyChange(key.trim());
+      onProfileChange({ ...draft, apiUrl, cloudModel, provider: selected ? provider : api ? 'ollama' : 'cloud' });
+      if (api) onKeyChange(trimmedKey);
       onClose();
     } catch {
       setError('Не удалось сохранить профиль в браузере.');
@@ -38,16 +113,23 @@ export function ProviderSettings({ config, failed, provider, profile, apiKey, on
       <p>Эти настройки применяются при запуске исторического эпизода в Market.</p>
       {api ? (
         <>
-          <p>Модель OpenAI <code>{config.openaiModel}</code></p>
-          <label className="studio-field">API-ключ OpenAI
-            <input type="password" value={key} autoComplete="off" spellCheck={false}
-              placeholder="sk-…" aria-describedby="openai-key-help" onChange={(event) => setKey(event.target.value)} />
+          <label className="studio-field">Адрес API
+            <input type="url" required maxLength={2048} value={draft.apiUrl ?? ''} autoComplete="off" spellCheck={false}
+              placeholder="https://api.example.com/v1" aria-describedby="cloud-url-help" onChange={(event) => {
+                setDraft({ ...draft, apiUrl: event.target.value });
+                setKey('');
+              }} />
           </label>
-          <p id="openai-key-help">Ключ действует до перезагрузки страницы. При запуске материалы эпизода отправляются в OpenAI.</p>
-          <div className="studio-links">
-            <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer">Создать API-ключ</a>
-            <a href="https://platform.openai.com/settings/organization/billing/overview" target="_blank" rel="noreferrer">Настроить оплату API</a>
-          </div>
+          <p id="cloud-url-help">Укажите базовый URL или полный адрес совместимого эндпоинта Chat Completions.</p>
+          <label className="studio-field">Идентификатор модели
+            <input required maxLength={150} value={draft.cloudModel ?? ''} autoComplete="off" spellCheck={false}
+              onChange={(event) => setDraft({ ...draft, cloudModel: event.target.value })} />
+          </label>
+          <label className="studio-field">API-ключ
+            <input type="password" required={selected} value={key} autoComplete="off" spellCheck={false}
+              aria-describedby="cloud-key-help" onChange={(event) => setKey(event.target.value)} />
+          </label>
+          <p id="cloud-key-help">Ключ действует до перезагрузки страницы. Материалы эпизода отправляются выбранному провайдеру.</p>
         </>
       ) : (
         <>
@@ -67,23 +149,9 @@ export function ProviderSettings({ config, failed, provider, profile, apiKey, on
         </>
       )}
       <label className="studio-check">
-        <input type="checkbox" checked={selected} disabled={!api && !config.openaiModel} onChange={(event) => setSelected(event.target.checked)} /> Использовать для исторического разбора
+        <input type="checkbox" checked={selected} disabled={!api && selected && (!config.cloud || !apiKey)}
+          onChange={(event) => setSelected(event.target.checked)} /> Использовать для исторического разбора
       </label>
-      <fieldset className="studio-assets">
-        <legend>Проверки в историческом разборе</legend>
-        <div className="studio-asset-options">
-          {(Object.entries(config.checks) as [CheckName, string][]).map(([name, label]) => {
-            const checks = draft.checks ?? config.defaults.checks;
-            return (
-              <label className="watch-chip" key={name}>
-                <input type="checkbox" checked={checks.includes(name)} onChange={(event) =>
-                  setDraft({ ...draft, checks: event.target.checked ? [...checks, name] : checks.filter((item) => item !== name) })} />
-                <span className="checkbox" aria-hidden="true"><Check size={12} strokeWidth={2.5} /></span>{label}
-              </label>
-            );
-          })}
-        </div>
-      </fieldset>
       {error && <p className="studio-error" role="alert">{error}</p>}
       <div className="studio-actions">
         <button className="button button-stop" type="button" onClick={onClose}>Отмена</button>
@@ -123,6 +191,21 @@ export function TelegramSettings({ connectedChat, onConnect }: { connectedChat: 
     }
   }
 
+  async function disconnect() {
+    setPending(true);
+    setError('');
+    try {
+      const response = await fetch('/api/studio/telegram', { method: 'DELETE', signal: AbortSignal.timeout(12000) });
+      if (!response.ok) throw new Error();
+      onConnect('');
+      setToken('');
+    } catch {
+      setError('Не удалось отключить Telegram. Повторите попытку.');
+    } finally {
+      setPending(false);
+    }
+  }
+
   return (
     <form className="studio-form" onSubmit={test}>
       <p>Создайте бота через <a href="https://t.me/BotFather" target="_blank" rel="noreferrer">BotFather</a> и откройте с ним чат или добавьте его в нужную группу.</p>
@@ -134,13 +217,13 @@ export function TelegramSettings({ connectedChat, onConnect }: { connectedChat: 
         <input required value={chat} autoComplete="off" spellCheck={false} placeholder="Например, 123456789"
           pattern="-?[0-9]+|@[a-zA-Z0-9_]+" maxLength={80} disabled={pending} onChange={(event) => setChat(event.target.value)} />
       </label>
-      <p>Токен используется для тестового сообщения и не сохраняется.</p>
-      {connectedChat && <p className="studio-feedback" role="status">Тестовое сообщение отправлено в {connectedChat}.</p>}
+      <p>После успешного теста токен хранится в памяти сервера до отключения или перезапуска. В сценарии выберите Telegram в поле «Уведомления».</p>
+      {connectedChat && <p className="studio-feedback" role="status">Подключён чат {connectedChat}.</p>}
       {error && <p className="studio-error" role="alert">{error}</p>}
       <div className="studio-actions">
-        {connectedChat && <button className="button button-stop" type="button" disabled={pending} onClick={() => onConnect('')}>Отключить</button>}
+        {connectedChat && <button className="button button-stop" type="button" disabled={pending} onClick={() => void disconnect()}>Отключить</button>}
         <button className="button button-primary" type="submit" disabled={pending}>
-          <Send size={18} aria-hidden="true" /> {pending ? 'Отправляем…' : 'Отправить тест'}
+          <Send size={18} aria-hidden="true" /> {pending ? 'Подождите…' : 'Отправить тест'}
         </button>
       </div>
     </form>

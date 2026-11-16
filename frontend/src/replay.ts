@@ -1,4 +1,5 @@
 import type { Candle } from './market';
+import { isPilotTrigger, type Scenario } from './scenarios';
 
 type ReplayNews = {
   id: string;
@@ -18,6 +19,9 @@ export type ReplayEvent = {
   close: number;
   changePercent: number;
   indexChangePercent: number | null;
+  priceZ?: number | null;
+  volumeRatio?: number | null;
+  marketZ?: number | null;
   news: ReplayNews | null;
 };
 
@@ -26,4 +30,21 @@ export type ReplayEpisode = {
   warmupCount: number;
   thresholdPercent: number;
   event: ReplayEvent | null;
+  frames?: ReplayEvent[];
 };
+
+export function supportsReplayScenario(scenario: Scenario) {
+  return scenario.enabled && scenario.assets.includes('GAZP') && scenario.windowMinutes === 60
+    && (isPilotTrigger(scenario.trigger) || scenario.trigger === 'price');
+}
+
+export function matchesReplayScenario(scenario: Scenario, event: ReplayEvent) {
+  if (!supportsReplayScenario(scenario)) return false;
+  if (scenario.trigger === 'volume-spike') return event.volumeRatio != null && event.volumeRatio >= scenario.threshold;
+  const score = scenario.trigger === 'price-z' ? event.priceZ
+    : scenario.trigger === 'relative' ? event.marketZ : event.changePercent;
+  if (score == null || Math.abs(score) < scenario.threshold) return false;
+  const movement = scenario.trigger === 'relative' && event.indexChangePercent != null
+    ? event.changePercent - event.indexChangePercent : event.changePercent;
+  return scenario.direction === 'either' || (scenario.direction === 'up' ? movement > 0 : movement < 0);
+}

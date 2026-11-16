@@ -1,0 +1,103 @@
+.studio-dialog:has(.signal-dropdown) {
+  margin-block-start: var(--signal-dialog-top, auto);
+  max-height: calc(100dvh - 16px - var(--signal-dialog-top, 16px));
+  overflow: auto;
+  overflow-anchor: none;
+}
+.studio-dialog:has(.signal-dropdown)::after {
+  content: '';
+  display: block;
+  height: var(--signal-scroll-room, 0px);
+}
+.signal-dropdown {
+  position: relative;
+  min-width: 0;
+  height: 44px;
+  z-index: 2;
+}
+.signal-select {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--inset);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.signal-select:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 2px;
+}
+.signal-value {
+  position: relative;
+  align-self: stretch;
+  flex: 1;
+  overflow: hidden;
+}
+.signal-slot {
+  position: absolute;
+  inset: 0;
+}
+.signal-slot, .signal-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.signal-slot b, .signal-option b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.signal-chevron { flex: none; color: var(--soft); }
+.signal-options {
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 0;
+  width: 100%;
+  height: 0;
+  padding: 6px;
+  overflow: hidden;
+  visibility: hidden;
+  transform-origin: 50% 0;
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--line), 0 12px 24px rgb(0 0 0 / 18%);
+}
+.signal-option {
+  position: relative;
+  height: 44px;
+  padding: 0 var(--space-3);
+  color: var(--text);
+  cursor: pointer;
+}
+.signal-options[popover] {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  border: 0;
+  font: inherit;
+  overscroll-behavior: contain;
+}
+.signal-option[aria-disabled="true"] { color: var(--muted); cursor: default; }
+.signal-option b { flex: 1; }
+.signal-option svg { flex: none; }
+.signal-highlight {
+  position: absolute;
+  top: 0;
+  left: 6px;
+  right: 6px;
+  border-radius: var(--radius-control);
+  background: var(--raised);
+  pointer-events: none;
+}
+.studio-form .signal-description {
+  font-size: var(--text-meta);
+  line-height: 1.45;
+}

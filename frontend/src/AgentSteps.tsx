@@ -1,94 +1,64 @@
-// Motion adapted from Kokonut UI's AI State Loading (MIT).
-// https://kokonutui.com/docs/ai/ai-loading
-import { useEffect, useId, useState } from 'react';
-import { ChevronDown, Minus, X } from 'lucide-react';
+// Adapted from SmoothUI AI Task List by Eduardo Calvo.
+import { useId, useState } from 'react';
+import { ChevronDown } from 'lucide-react';
 import './agentSteps.css';
 
-type StepStatus = 'pending' | 'running' | 'done' | 'skipped' | 'error';
-export type AgentStep = { id: string; label: string; status: StepStatus; log?: string[] };
-
-const statusLabels: Record<StepStatus, string> = {
-  pending: 'В ожидании', running: 'В работе', done: 'Завершено', skipped: 'Пропущено', error: 'Ошибка',
+type StepStatus = 'pending' | 'running' | 'done' | 'failed' | 'skipped';
+export type AgentStep = {
+  id: string;
+  label: string;
+  status: StepStatus;
+  note?: string;
+  children?: AgentStep[];
 };
 
-function formatElapsed(seconds: number) {
-  if (seconds < 60) return `${seconds} с`;
-  return `${Math.floor(seconds / 60)} мин ${String(seconds % 60).padStart(2, '0')} с`;
-}
-
-function useElapsed(active: boolean) {
-  const [startedAt] = useState(() => performance.now());
-  const [seconds, setSeconds] = useState(0);
-
-  useEffect(() => {
-    const tick = () => setSeconds(Math.floor((performance.now() - startedAt) / 1000));
-    tick();
-    if (!active) return;
-    const interval = window.setInterval(tick, 500);
-    return () => window.clearInterval(interval);
-  }, [active, startedAt]);
-
-  return seconds;
-}
-
-function StepIcon() {
-  return <span className="agent-step-icon" aria-hidden="true">
-    <span className="agent-step-dot" data-icon="pending" />
-    <span className="agent-step-spinner" data-icon="running" />
-    <svg data-icon="done" width="14" height="14" viewBox="0 0 16 16" fill="none">
-      <path d="M3.5 8.5 6.5 11.5 12.5 4.5" pathLength="1" stroke="currentColor"
-        strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.75" />
-    </svg>
-    <Minus data-icon="skipped" size={14} />
-    <X data-icon="error" size={14} />
-  </span>;
-}
+const statusLabels: Record<StepStatus, string> = {
+  pending: 'В ожидании', running: 'В работе', done: 'Завершено', failed: 'Ошибка', skipped: 'Пропущено',
+};
+const marks: Partial<Record<StepStatus, string>> = {
+  done: 'M 3.5 7.5 L 6 10 L 10.5 4.5',
+  failed: 'M 5 5 L 9 9 M 9 5 L 5 9',
+  skipped: 'M 4.5 7 L 9.5 7',
+};
 
 function StepRow({ step }: { step: AgentStep }) {
-  const { label, status, log = [] } = step;
-  const rowHeight = 24;
-  const visibleRows = Math.min(log.length, 3);
-  return <li className="agent-step" data-status={status}>
-    <StepIcon />
-    <div className="agent-step-content">
-      <span className="agent-step-sr">{label}. {statusLabels[status]}.</span>
-      <span aria-hidden="true" className="agent-step-label">
-        {status === 'running' ? Array.from(label, (letter, index) =>
-          <span key={index} style={{ animationDelay: `${index * 50}ms` }}>{letter}</span>) : label}
-      </span>
-      {status === 'running' && log.length > 0 && (
-        <div className="agent-step-log" data-fade={visibleRows === 3}
-          style={{ height: rowHeight * visibleRows }}>
-          <div style={{ transform: `translateY(-${rowHeight * (log.length - visibleRows)}px)` }}>
-            {log.map((line, index) => <p key={line}>
-              <span aria-hidden="true">{index + 1}</span>{line}
-            </p>)}
-          </div>
-        </div>
-      )}
+  const mark = marks[step.status];
+  return <li>
+    <div className="agent-step" data-status={step.status}>
+      <svg className="agent-step-box" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+        <rect x={1} y={1} width={12} height={12} rx={3.5} strokeWidth={1.4} />
+        {mark && <path className="agent-step-mark" d={mark} pathLength={1} strokeDasharray="1 1"
+          strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} />}
+      </svg>
+      <span className="agent-step-label">{step.label}</span>
+      <span className="agent-step-sr">{statusLabels[step.status]}</span>
+      {step.note && <span className="agent-step-note figures">{step.note}</span>}
     </div>
+    {!!step.children?.length && <ul>
+      {step.children.map((child) => <StepRow key={child.id} step={child} />)}
+    </ul>}
   </li>;
 }
 
-export function AgentSteps({ steps }: { steps: AgentStep[] }) {
+export function AgentSteps({ steps, initiallyOpen }: { steps: AgentStep[]; initiallyOpen: boolean }) {
   const listId = useId();
-  const running = steps.find((step) => step.status === 'running');
-  const seconds = useElapsed(Boolean(running));
-  const [expanded, setExpanded] = useState(true);
-  const title = expanded ? 'ИИ-разбор в работе' : running?.label ?? 'Подготовка разбора';
-  const elapsed = formatElapsed(seconds);
+  const [expanded, setExpanded] = useState(initiallyOpen);
+  const rows = steps.flatMap((step) => [step, ...(step.children ?? [])]);
+  const done = rows.filter(({ status }) => status === 'done').length;
 
   return <div className="agent-steps">
     <button className="agent-steps-toggle" type="button" aria-expanded={expanded} aria-controls={listId}
       onClick={() => setExpanded(!expanded)}>
-      <output className="agent-steps-title">{title}</output>
-      {(running || seconds > 0) && <span className="agent-steps-time figures">{elapsed}</span>}
+      <span>Журнал действий</span>
+      <span className="agent-steps-count figures" aria-label={`Завершено ${done} из ${rows.length}`}>{done}/{rows.length}</span>
       <ChevronDown size={16} aria-hidden="true" />
     </button>
     <div className="agent-steps-drawer" data-expanded={expanded} id={listId} inert={!expanded}>
-      <ol aria-label="Этапы разбора сигнала">
-        {steps.map((step) => <StepRow key={step.id} step={step} />)}
-      </ol>
+      <div className="agent-steps-clip">
+        <ol aria-label="Этапы разбора сигнала">
+          {steps.map((step) => <StepRow key={step.id} step={step} />)}
+        </ol>
+      </div>
     </div>
   </div>;
 }

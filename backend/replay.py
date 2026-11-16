@@ -6,6 +6,7 @@ from itertools import pairwise
 from pathlib import Path
 
 from pydantic import BaseModel
+from backend.replay_models import replay_scores
 
 
 HOUR = 3600
@@ -85,7 +86,31 @@ def gazprom_replay():
         }
         break
 
-    return {"candles": candles, "warmupCount": warmup_count, "thresholdPercent": float(THRESHOLD_PERCENT), "event": event}
+    history = json.loads((Path(__file__).with_name("data") / "gazp-signal-history.json").read_text())
+    scores = replay_scores(history, candles, data["IMOEX"], REPLAY_START, HOUR, MOSCOW)
+    frames = []
+    for previous, current in pairwise(candles):
+        time = current["time"]
+        if time not in scores or time - previous["time"] != HOUR or not previous["complete"]:
+            continue
+        detected_at = time + HOUR
+        frames.append({
+            "event_id": f"gazp-tqbr-1h-{detected_at}",
+            "ticker": "GAZP",
+            "rule": "Проверка моделей на закрытии часовой свечи",
+            "candleTime": time,
+            "detectedAt": detected_at,
+            "changePercent": float(change_percent(previous["close"], current["close"])),
+            "previousClose": previous["close"],
+            "close": current["close"],
+            "news": NEWS if news_time <= detected_at else None,
+            **scores[time],
+        })
+
+    return {
+        "candles": candles, "warmupCount": warmup_count, "thresholdPercent": float(THRESHOLD_PERCENT),
+        "event": event, "frames": frames,
+    }
 
 
 class Signal(BaseModel):
@@ -103,8 +128,11 @@ class Signal(BaseModel):
     rule: str
 
 
-def gazprom_signal() -> Signal | None:
-    event = gazprom_replay()["event"]
+def gazprom_signal(event_id: str | None = None) -> Signal | None:
+    episode = gazprom_replay()
+    event = episode["event"]
+    if event_id is not None and (event is None or event["event_id"] != event_id):
+        event = next((frame for frame in episode["frames"] if frame["event_id"] == event_id), None)
     if event is None:
         return None
     return Signal(
