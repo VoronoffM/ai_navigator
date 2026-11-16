@@ -1,0 +1,119 @@
+/*
+ * Adapted from SmoothUI's Siri Orb (https://smoothui.dev/docs/components/siri-orb).
+ *
+ * MIT License
+ * Copyright (c) 2024 Eduardo Calvo
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+@property --siri-orb-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.siri-orb {
+  --siri-orb-size: 34px;
+  --siri-orb-violet: color-mix(in oklab, var(--lavender) 72%, var(--lavender-surface));
+  --siri-orb-rose: var(--negative);
+  --siri-orb-blue: var(--blue);
+  --siri-orb-lilac: var(--lavender);
+  display: block;
+  position: relative;
+  isolation: isolate;
+  flex: none;
+  width: var(--siri-orb-size);
+  height: var(--siri-orb-size);
+  border-radius: 50%;
+  animation: siri-orb-breathe 5.5s cubic-bezier(.645, .045, .355, 1) infinite;
+}
+
+.siri-orb::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: -12%;
+  border-radius: inherit;
+  background: radial-gradient(circle, var(--siri-orb-blue), transparent 64%);
+  filter: blur(calc(var(--siri-orb-size) * .28));
+  opacity: .45;
+}
+
+.siri-orb-disc {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  background: var(--lavender-surface);
+}
+
+.siri-orb-disc::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    conic-gradient(from calc(var(--siri-orb-angle) * 2) at 25% 70%, var(--siri-orb-violet), transparent 20% 80%, var(--siri-orb-violet)),
+    conic-gradient(from calc(var(--siri-orb-angle) * 2) at 45% 75%, var(--siri-orb-blue), transparent 30% 60%, var(--siri-orb-blue)),
+    conic-gradient(from calc(var(--siri-orb-angle) * -3) at 80% 20%, var(--siri-orb-rose), transparent 40% 60%, var(--siri-orb-rose)),
+    conic-gradient(from calc(var(--siri-orb-angle) * 1.5) at 60% 35%, var(--siri-orb-lilac), transparent 25% 75%, var(--siri-orb-lilac)),
+    conic-gradient(from calc(var(--siri-orb-angle) * 2) at 15% 5%, var(--siri-orb-blue), transparent 10% 90%, var(--siri-orb-blue)),
+    conic-gradient(from var(--siri-orb-angle) at 20% 80%, var(--siri-orb-rose), transparent 10% 90%, var(--siri-orb-rose)),
+    conic-gradient(from calc(var(--siri-orb-angle) * -2) at 85% 10%, var(--siri-orb-violet), transparent 20% 80%, var(--siri-orb-violet));
+  filter: blur(1px) contrast(1.44) saturate(1.4);
+  animation: siri-orb-rotate 20s linear infinite;
+}
+
+.siri-orb-disc::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 16%),
+    inset 0 2px 4px rgb(255 255 255 / 22%),
+    inset 0 -2.5px 5px rgb(0 0 0 / 40%);
+}
+
+.siri-orb-sheen {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 30% 24%, rgb(255 255 255 / 32%), transparent 34%),
+    radial-gradient(circle at 72% 80%, rgb(255 255 255 / 7%), transparent 48%);
+  mix-blend-mode: screen;
+  animation: siri-orb-drift 12s ease-in-out infinite alternate;
+}
+
+@keyframes siri-orb-breathe {
+  50% { transform: scale(1.035); }
+}
+
+@keyframes siri-orb-rotate {
+  to { --siri-orb-angle: 360deg; }
+}
+
+@keyframes siri-orb-drift {
+  from { transform: translate(-6%, -4%) scale(1.05); }
+  to { transform: translate(7%, 6%) scale(1.12); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .siri-orb, .siri-orb-disc::before, .siri-orb-sheen { animation: none; }
+}

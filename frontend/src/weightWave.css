@@ -1,0 +1,9 @@
+.weight-wave {
+  display: inline-block;
+  position: relative;
+  max-width: 100%;
+  color: var(--text);
+}
+
+.weight-wave-word { white-space: nowrap; }
+.weight-wave-letter { display: inline-block; }

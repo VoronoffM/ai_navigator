@@ -1,27 +1,33 @@
 import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ChartCandlestick, CircleAlert, Clock3, Radar, RefreshCw } from 'lucide-react';
+import { ChartCandlestick, ChevronDown, CircleAlert, Clock3, RefreshCw } from 'lucide-react';
 import '@fontsource-variable/inter/wght.css';
 import { normalizeProfile, readProfile, saveProfile, type AnalysisConfig, type Profile } from './analysis';
 import { AgentStudio } from './AgentStudio';
+import { CandleIntervalControl } from './CandleIntervalControl';
 import { Chart } from './Chart';
 import { Navigator } from './Navigator';
+import { WorkspaceNav } from './WorkspaceNav';
+import { storageKey } from './scenarios';
+import { loadStudio, studioSettingsKey } from './studioSettings';
 import { marketTime, number, symbols, useMarketResource, type Candle, type Interval, type QuoteRow, type Ticker } from './market';
 import type { ReplayEpisode } from './replay';
 import './style.css';
 import './studio.css';
 
-const intervals = [{ value: '1h', label: '1ч' }, { value: '1d', label: '1д' }] as const;
-
 function Terminal() {
   const [section, setSection] = useState<'market' | 'studio'>('market');
+  const [studio, setStudio] = useState(loadStudio);
   const [ticker, setTicker] = useState<Ticker>('GAZP');
   const [interval, setInterval] = useState<Interval>('1h');
   const [revision, setRevision] = useState(0);
   const [replayRevision, setReplayRevision] = useState(0);
   const [replayCount, setReplayCount] = useState<number | null>(null);
   const [savedProfile, setSavedProfile] = useState(readProfile);
-  const [replayProfile, setReplayProfile] = useState<Profile>({});
+  const [openaiKey, setOpenaiKey] = useState('');
+  const [replaySettings, setReplaySettings] = useState<{ profile: Profile; openaiKey: string }>({
+    profile: {}, openaiKey: '',
+  });
   const configResource = useMarketResource<AnalysisConfig>('/api/analysis/config', 0, false);
   const config = configResource.status === 'ready' ? configResource.data : undefined;
   const quotes = useMarketResource<QuoteRow[]>('/api/quotes', revision);
@@ -46,6 +52,14 @@ function Terminal() {
   const loading = quotes.status === 'loading' || candles.status === 'loading';
 
   useEffect(() => {
+    function sync(event: StorageEvent) {
+      if (event.key === storageKey || event.key === studioSettingsKey || event.key === null) setStudio(loadStudio());
+    }
+    window.addEventListener('storage', sync);
+    return () => window.removeEventListener('storage', sync);
+  }, []);
+
+  useEffect(() => {
     if (!replayRunning || replayCount === null) return;
     const timer = window.setTimeout(() => setReplayCount(replayCount + 1), 1100);
     return () => window.clearTimeout(timer);
@@ -53,7 +67,8 @@ function Terminal() {
 
   function playReplay() {
     if (episode) {
-      setReplayProfile(normalizeProfile(savedProfile, config));
+      const profile = normalizeProfile(savedProfile, config);
+      setReplaySettings({ profile, openaiKey: profile.provider === 'openai' ? openaiKey.trim() : '' });
       setReplayCount(episode.warmupCount);
     } else setReplayRevision((value) => value + 1);
   }
@@ -73,17 +88,18 @@ function Terminal() {
       <header className="topbar">
         <div className="topbar-inner">
           <div className="brand">
-            <span className="brand-mark"><Radar size={19} aria-hidden="true" /></span>
-            <span>AI Navigator</span>
+            <img className="brand-mark" src="/logos/marketing.svg" alt="" width={34} height={34} />
+            <span>AI Штурман</span>
           </div>
-          <nav className="workspace-nav" aria-label="Разделы AI Navigator">
-            <button type="button" aria-current={section === 'market' ? 'page' : undefined}
-              onClick={() => setSection('market')}>Market</button>
-            <button type="button" aria-current={section === 'studio' ? 'page' : undefined}
-              onClick={() => setSection('studio')}>Agent Studio</button>
-          </nav>
+          <WorkspaceNav section={section} onChange={setSection} />
           <div className="topbar-actions" hidden={section !== 'market'}>
-            <div className="source"><span>{historical ? 'T-Invest MCP' : 'T-Invest API'}</span><span className="source-mode">{historical ? 'Исторический режим' : 'Песочница'}</span></div>
+            <div className="mode-picker">
+              <select aria-label="Режим работы" defaultValue="historical">
+                <option value="historical">Исторический режим</option>
+                <option value="live" disabled>Реальный режим (недоступен)</option>
+              </select>
+              <ChevronDown size={15} aria-hidden="true" />
+            </div>
             {!historical && <button className="icon-button" aria-label="Обновить рыночные данные" title="Обновить рыночные данные"
               type="button" disabled={loading} onClick={refresh}>
               <RefreshCw size={16} className={loading ? 'rotating' : undefined} aria-hidden="true" />
@@ -140,12 +156,7 @@ function Terminal() {
           <div className="chart-panel">
             <div className="chart-toolbar">
               <h2>Свечной график</h2>
-              <div className="intervals" role="group" aria-label="Интервал свечей">
-                {intervals.map((option) => (
-                  <button type="button" key={option.value} aria-pressed={option.value === shownInterval}
-                    disabled={historical} onClick={() => setInterval(option.value)}>{option.label}</button>
-                ))}
-              </div>
+              <CandleIntervalControl value={shownInterval} disabled={historical} onChange={setInterval} />
             </div>
             {lastBar ? (
               <Chart key={historical ? 'replay:gazprom' : `${ticker}:${interval}`} candles={bars} interval={shownInterval} />
@@ -171,12 +182,18 @@ function Terminal() {
           </div>
         </section>
 
-        <Navigator event={event} profile={replayProfile} running={replayRunning} replay={historical}
+        <Navigator event={event} profile={replaySettings.profile} openaiKey={replaySettings.openaiKey}
+          running={replayRunning} replay={historical}
           loading={replayResource.status === 'loading'} issue={replayIssue} threshold={episode?.thresholdPercent}
+          studio={studio} onOpenStudio={() => {
+            setSection('studio');
+            requestAnimationFrame(() => document.getElementById('studio-title')?.focus());
+          }}
           onPlay={playReplay} onExit={() => setReplayCount(null)} />
       </main>
-      <AgentStudio visible={section === 'studio'} analysisConfig={config}
+      <AgentStudio visible={section === 'studio'} studio={studio} setStudio={setStudio} analysisConfig={config}
         analysisConfigFailed={configResource.status === 'error'} profile={normalizeProfile(savedProfile, config)}
+        openaiKey={openaiKey} onOpenaiKeyChange={setOpenaiKey}
         onProfileChange={(profile) => {
           setSavedProfile(profile);
           saveProfile(profile);

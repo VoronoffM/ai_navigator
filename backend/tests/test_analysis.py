@@ -5,8 +5,10 @@ import unittest
 from datetime import date
 from unittest.mock import patch
 
+import httpx
+
 from backend.analysis import AnalysisService, Profile, resolve_citations
-from backend.llm import ProviderError
+from backend.llm import OPENAI_MODEL, ProviderError
 from backend.replay import gazprom_replay, gazprom_signal
 from backend.signal_checks import (
     CALENDAR_ONLY, CHECKS, LiveChecks, Material, ReplayChecks, dividend_result, report_result,
@@ -99,6 +101,46 @@ class AnalysisTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result["llm"], "failed")
             self.assertEqual(result["checks"]["news"]["materials"][0]["id"], "interfax-1027187")
             self.assertEqual(result["checks"]["market"]["status"], "ok")
+
+    async def test_openai_routing_and_retries_are_scoped_to_the_key(self):
+        requests = []
+
+        def openai(request):
+            body = json.loads(request.content)
+            requests.append(request.headers["Authorization"])
+            self.assertEqual(str(request.url), "https://api.openai.com/v1/chat/completions")
+            self.assertEqual(body["model"], OPENAI_MODEL)
+            self.assertFalse(body["store"])
+            schema = body["response_format"]["json_schema"]
+            self.assertTrue(schema["strict"])
+            ids = schema["schema"]["$defs"]["Statement"]["properties"]["materialIds"]["items"]["enum"]
+            self.assertEqual(ids, ["interfax-1027187"])
+            if len(requests) == 1:
+                return httpx.Response(429)
+            return httpx.Response(200, json={"choices": [
+                {"finish_reason": "stop", "message": {"content": self.provider.response}},
+            ]})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(openai)) as client:
+            self.service.openai_client = client
+            profile = Profile(provider="openai")
+            missing = await self.finish(self.service.start(self.event, profile))
+            self.assertEqual(missing["llm"], "failed")
+            self.assertEqual(missing["checks"]["news"]["status"], "ok")
+            self.assertEqual(requests, [])
+
+            failed = await self.finish(self.service.start(self.event, profile, "test-key"))
+            self.assertIn("лимит OpenAI", failed["reason"])
+            retry = self.service.start(self.event, profile, "test-key")
+            self.assertNotEqual(retry["id"], failed["id"])
+            self.assertEqual(retry["id"], self.service.start(self.event, profile, "test-key")["id"])
+            ready = await self.finish(retry)
+            self.assertEqual(ready["llm"], "ready")
+            self.assertNotIn("test-key", json.dumps(ready))
+            other = await self.finish(self.service.start(self.event, profile, "other-key"))
+            self.assertNotEqual(other["id"], ready["id"])
+            self.assertEqual(requests, ["Bearer test-key", "Bearer test-key", "Bearer other-key"])
+            self.assertEqual(self.provider.calls, [])
 
     async def test_empty_news_and_report_calendar_as_of_signal(self):
         news = await LiveChecks(EmptyNews()).news(self.event)

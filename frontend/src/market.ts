@@ -60,13 +60,13 @@ export function useMarketResource<T>(path: string, revision: number, refresh = t
             status: 'error',
             issue: typeof issue?.message === 'string'
               ? issue
-              : { code: 'local_server', message: 'Проверьте, что запущен локальный сервер AI Navigator.' },
+              : { code: 'local_server', message: 'Проверьте, что запущен локальный сервер AI Штурман.' },
           };
         }
       } catch {
         value = {
           status: 'error',
-          issue: { code: 'local_server', message: 'Не удалось получить ответ локального сервера AI Navigator.' },
+          issue: { code: 'local_server', message: 'Не удалось получить ответ локального сервера AI Штурман.' },
         };
       }
       if (!controller.signal.aborted) {

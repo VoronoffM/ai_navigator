@@ -1,13 +1,15 @@
 import os
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field, SecretStr
 
 from backend.analysis import AnalysisService, Profile
 from backend.llm import OllamaProvider
@@ -26,14 +28,16 @@ async def lifespan(app: FastAPI):
         app.state.market = SandboxMarket(client, os.getenv("TBANK_TOKEN", "").strip())
         event = gazprom_replay()["event"]
         checks = ReplayChecks(event["news"] if event else None)
-        app.state.analysis = AnalysisService(OllamaProvider(client), {name: getattr(checks, name) for name in CHECKS})
+        app.state.analysis = AnalysisService(
+            OllamaProvider(client), {name: getattr(checks, name) for name in CHECKS}, openai_client=client,
+        )
         try:
             yield
         finally:
             await app.state.analysis.shutdown()
 
 
-app = FastAPI(title="AI Navigator", lifespan=lifespan)
+app = FastAPI(title="AI Штурман", lifespan=lifespan)
 
 
 @app.exception_handler(MarketError)
@@ -62,12 +66,14 @@ async def analysis_config(request: Request):
 
 
 @app.post("/api/analysis/{event_id}")
-async def start_analysis(request: Request, event_id: str, profile: Profile):
+async def start_analysis(request: Request, event_id: str, profile: Profile,
+                         authorization: Annotated[str, Header()] = ""):
     signal = gazprom_signal()
     if signal is None or signal.event_id != event_id:
         raise HTTPException(status_code=404, detail="Историческое событие не найдено.")
     try:
-        job = request.app.state.analysis.start(signal, profile)
+        scheme, _, key = authorization.partition(" ")
+        job = request.app.state.analysis.start(signal, profile, key.strip() if scheme.lower() == "bearer" else "")
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return JSONResponse(job, status_code=200 if job["status"] == "done" else 202)
@@ -79,6 +85,30 @@ async def analysis_job(request: Request, job_id: str):
     if job is None:
         raise HTTPException(status_code=404, detail="Разбор не найден.")
     return JSONResponse(job, headers={"Cache-Control": "no-store"})
+
+
+class TelegramTest(BaseModel):
+    token: SecretStr
+    chat_id: str = Field(max_length=80, pattern=r"^(-?[0-9]+|@[A-Za-z0-9_]+)$")
+
+
+@app.post("/api/studio/telegram/test")
+async def test_telegram(settings: TelegramTest):
+    token = settings.token.get_secret_value()
+    if len(token) > 128 or not re.fullmatch(r"[0-9]+:[A-Za-z0-9_-]+", token):
+        raise HTTPException(status_code=422, detail="Проверьте формат токена бота.")
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            response = await client.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={"chat_id": settings.chat_id, "text": "AI Штурман · тест подключения Agent Studio"},
+            )
+        result = response.json()
+    except (httpx.RequestError, ValueError):
+        raise HTTPException(status_code=502, detail="Сервис Telegram недоступен. Повторите попытку.") from None
+    if not response.is_success or not isinstance(result, dict) or result.get("ok") is not True:
+        raise HTTPException(status_code=502, detail="Telegram не принял сообщение. Проверьте токен, чат и права бота.")
+    return {"ok": True}
 
 
 dist = ROOT / "frontend" / "dist"

@@ -28,8 +28,8 @@ TOKEN = os.getenv("TBANK_TOKEN")
 TG_TOKEN = os.getenv("TG_TOKEN")
 TG_CHAT_ID = os.getenv("TG_CHAT_ID")
 
-st.set_page_config(page_title="AI-Navigator Terminal", layout="wide")
-st.title("📈 AI-Штурман: Мульти-Агентный Терминал")
+st.set_page_config(page_title="AI Штурман · Рыночный терминал", layout="wide")
+st.title("📈 AI Штурман: Мульти-Агентный Терминал")
 
 if "logs" not in st.session_state: st.session_state.logs = []
 if "selected_ticker" not in st.session_state: st.session_state.selected_ticker = "GAZP"

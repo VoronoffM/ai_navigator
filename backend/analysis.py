@@ -1,12 +1,15 @@
 import asyncio
 import logging
 import os
+from collections.abc import Callable
+from hashlib import sha256
 from typing import Annotated, Literal
 from uuid import uuid4
 
+import httpx
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
-from backend.llm import LLMProvider, ProviderError
+from backend.llm import OPENAI_MODEL, LLMProvider, OpenAIProvider, ProviderError
 from backend.replay import Signal
 from backend.signal_checks import CHECKS, Check, CheckName, CheckResult, Material
 
@@ -18,6 +21,7 @@ LLM_TIMEOUT = 45
 
 class Profile(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    provider: Literal["ollama", "openai"] = "ollama"
     model: str | None = Field(default=None, max_length=150)
     checks: set[CheckName] | None = None
 
@@ -62,8 +66,10 @@ def resolve_citations(raw: str, materials: dict[str, Material]) -> dict:
 
 
 class AnalysisService:
-    def __init__(self, provider: LLMProvider, checks: dict[CheckName, Check]):
+    def __init__(self, provider: LLMProvider, checks: dict[CheckName, Check], *,
+                 openai_client: httpx.AsyncClient | None = None):
         self.provider = provider
+        self.openai_client = openai_client
         self.checks = checks
         self.models = list(dict.fromkeys(model.strip() for model in os.getenv(
             "ANALYSIS_MODELS", "qwen2.5:3b"
@@ -72,30 +78,42 @@ class AnalysisService:
         if self.default_model not in self.models:
             raise ValueError("ANALYSIS_DEFAULT_MODEL must be included in ANALYSIS_MODELS")
         self.jobs: dict[str, dict] = {}
-        self.job_keys: dict[tuple[str, str, tuple[CheckName, ...]], str] = {}
+        self.job_keys: dict[tuple[str, str, str, tuple[CheckName, ...], bytes], str] = {}
         self.tasks: set[asyncio.Task] = set()
 
     def config(self):
         return {
             "provider": self.provider.name, "models": self.models, "checks": CHECKS,
+            "openaiModel": OPENAI_MODEL if self.openai_client is not None else None,
             "defaults": {"model": self.default_model, "checks": list(self.checks)},
         }
 
-    def start(self, event: Signal, profile: Profile) -> dict:
-        model = self.default_model if profile.model is None else profile.model
-        if model not in self.models:
+    def start(self, event: Signal, profile: Profile, openai_key: str = "") -> dict:
+        provider = self.provider
+        models, default = self.models, self.default_model
+        credential_hash = b""
+        if profile.provider == "openai":
+            if self.openai_client is None:
+                raise ValueError("OpenAI недоступна на этом сервере.")
+            provider = OpenAIProvider(self.openai_client, openai_key)
+            models, default = [OPENAI_MODEL], OPENAI_MODEL
+            credential_hash = sha256(openai_key.encode()).digest()
+        model = default if profile.model is None else profile.model
+        if model not in models:
             raise ValueError("Выбранная модель отсутствует в настройках сервера.")
         enabled = set(self.checks) if profile.checks is None else profile.checks
         if not enabled.issubset(self.checks):
             raise ValueError("Выбранная проверка недоступна для этого сценария.")
         names = tuple(name for name in self.checks if name in enabled)
-        key = (event.event_id, model, names)
+        key = (event.event_id, profile.provider, model, names, credential_hash)
         if job_id := self.job_keys.get(key):
-            return self.jobs[job_id]
+            job = self.jobs[job_id]
+            if job.get("llm") != "failed":
+                return job
         job_id = uuid4().hex
         self.job_keys[key] = job_id
         self.jobs[job_id] = {"id": job_id, "event_id": event.event_id, "status": "collecting"}
-        task = asyncio.create_task(self.run(job_id, event, model, names))
+        task = asyncio.create_task(self.run(job_id, event, provider, model, names))
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
         return self.jobs[job_id]
@@ -115,8 +133,15 @@ class AnalysisService:
             logger.warning("Check %s failed (%s)", name, type(exc).__name__)
             return CheckResult("unavailable", "Не удалось получить данные из источника.")
 
-    async def collect(self, event: Signal, names: tuple[CheckName, ...]) -> dict[CheckName, CheckResult]:
-        tasks = {name: asyncio.create_task(self.run_check(name, event)) for name in names}
+    async def collect(self, event: Signal, names: tuple[CheckName, ...],
+                      on_check: Callable[[CheckName, CheckResult], None] | None = None) -> dict[CheckName, CheckResult]:
+        async def check_source(name: CheckName) -> CheckResult:
+            result = await self.run_check(name, event)
+            if on_check is not None:
+                on_check(name, result)
+            return result
+
+        tasks = {name: asyncio.create_task(check_source(name)) for name in names}
         try:
             if tasks:
                 await asyncio.wait(tasks.values(), timeout=COLLECTION_TIMEOUT)
@@ -132,15 +157,23 @@ class AnalysisService:
                 task.cancel()
             await asyncio.gather(*pending, return_exceptions=True)
 
-    async def run(self, job_id: str, event: Signal, model: str, names: tuple[CheckName, ...]):
+    async def run(self, job_id: str, event: Signal, provider: LLMProvider,
+                  model: str, names: tuple[CheckName, ...]):
         running = self.jobs[job_id]
         result = {
             **running, "status": "done", "llm": "skipped", "synthesis": None, "reason": None,
             "checks": {name: CheckResult("unavailable" if name in names else "disabled").payload()
                        for name in CHECKS},
         }
+
+        def record_check(name: CheckName, check: CheckResult) -> None:
+            job = self.jobs[job_id]
+            self.jobs[job_id] = {
+                **job, "completedChecks": {**job.get("completedChecks", {}), name: check.status},
+            }
+
         try:
-            checks = await self.collect(event, names)
+            checks = await self.collect(event, names, record_check)
             result["checks"] = {name: check.payload() for name, check in checks.items()}
             materials = {item.id: item for check in checks.values() for item in check.materials}
             if materials:
@@ -156,7 +189,7 @@ class AnalysisService:
                 id_field = schema["$defs"]["Statement"]["properties"]["materialIds"]["items"]
                 id_field["enum"] = list(materials)
                 async with asyncio.timeout(LLM_TIMEOUT):
-                    raw = await self.provider.generate(model, context, schema)
+                    raw = await provider.generate(model, context, schema)
                 result["synthesis"] = resolve_citations(raw, materials)
                 result["llm"] = "ready"
         except ProviderError as exc:
