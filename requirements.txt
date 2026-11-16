@@ -1,15 +1,11 @@
+# Фронтенд (Streamlit)
 streamlit
 pandas
-numpy
 plotly
-requests
+httpx
+
+# Бэкенд (FastAPI + Гоша)
+fastapi
+uvicorn
 python-dotenv
-t-tech-investments
-streamlit-autorefresh
-langchain
-langchain-chroma
-langchain-ollama
-chromadb
-outlines
-ollama
 pydantic
