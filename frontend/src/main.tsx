@@ -25,6 +25,7 @@ const modeOptions = [
 function Terminal() {
   const [theme, setTheme] = useState(readTheme);
   const [section, setSection] = useState<'market' | 'studio'>('market');
+  const [activeScenariosOnly, setActiveScenariosOnly] = useState(false);
   const [studio, setStudio] = useState(loadStudio);
   const [ticker, setTicker] = useState<Ticker>('GAZP');
   const [interval, setInterval] = useState<Interval>('1h');
@@ -115,7 +116,10 @@ function Terminal() {
             <img className="brand-mark" src="/logos/marketing.svg" alt="" width={34} height={34} />
             <span>AI Штурман</span>
           </div>
-          <WorkspaceNav section={section} onChange={setSection} />
+          <WorkspaceNav section={section} onChange={(destination) => {
+            setSection(destination);
+            setActiveScenariosOnly(false);
+          }} />
           <div className="topbar-actions">
             <div className="market-actions" hidden={section !== 'market'}>
               <div className="mode-picker">
@@ -212,12 +216,14 @@ function Terminal() {
           running={replayRunning} replay={historical}
           loading={replayResource.status === 'loading'} issue={replayIssue}
           studio={studio} replayStudio={replayStudio} onOpenStudio={() => {
+            setActiveScenariosOnly(true);
             setSection('studio');
-            requestAnimationFrame(() => document.getElementById('studio-title')?.focus());
+            requestAnimationFrame(() => document.getElementById('saved-scenarios-title')?.focus());
           }}
           onPlay={playReplay} onExit={() => setReplayCount(null)} />
       </main>
       <AgentStudio visible={section === 'studio'} studio={studio} setStudio={setStudio} analysisConfig={config}
+        activeScenariosOnly={activeScenariosOnly} onActiveScenariosOnlyChange={setActiveScenariosOnly}
         analysisConfigFailed={configResource.status === 'error'} profile={normalizeProfile(savedProfile, config)}
         apiKey={apiKey} onApiKeyChange={setApiKey}
         onProfileChange={(profile) => {

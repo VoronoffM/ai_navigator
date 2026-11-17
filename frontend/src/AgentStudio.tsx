@@ -12,7 +12,7 @@ import {
 } from './scenarios';
 import { ScenarioAssets, ScenarioEditor } from './ScenarioEditor';
 import {
-  readStudioScenarios, readStudioSettings, studioSettingsKey,
+  activeStudioScenarios, readStudioScenarios, readStudioSettings, studioSettingsKey,
   type ExtraIntegration, type StudioAgent, type StudioSettings, type StudioState,
 } from './studioSettings';
 import { ExtraSettings, InvestMcpDetails, ProviderSettings, TelegramSettings } from './StudioIntegrations';
@@ -42,6 +42,8 @@ type Overlay =
 
 type Props = {
   visible: boolean;
+  activeScenariosOnly: boolean;
+  onActiveScenariosOnlyChange: (activeOnly: boolean) => void;
   studio: StudioState;
   setStudio: Dispatch<SetStateAction<StudioState>>;
   analysisConfig?: AnalysisConfig;
@@ -53,7 +55,8 @@ type Props = {
 };
 
 export function AgentStudio(props: Props) {
-  const { visible, studio, setStudio, analysisConfig, analysisConfigFailed, profile, apiKey } = props;
+  const { visible, studio, setStudio, activeScenariosOnly, onActiveScenariosOnlyChange,
+    analysisConfig, analysisConfigFailed, profile, apiKey } = props;
   const [overlay, setOverlay] = useState<Overlay>();
   const [error, setError] = useState('');
   const [telegramChat, setTelegramChat] = useState('');
@@ -69,11 +72,20 @@ export function AgentStudio(props: Props) {
   }, []);
   const opener = useRef<HTMLElement>(null);
   const title = useRef<HTMLHeadingElement>(null);
+  const scenariosTitle = useRef<HTMLHeadingElement>(null);
+  const activeFilter = useRef<HTMLInputElement>(null);
   const { agents, integrations } = studio.settings;
   // A scenario remains reusable when its assigned agent is removed from the catalog.
   const agentIds = new Set(agents.map((agent) => agent.id));
   const scenarios = studio.scenarios.map((item) =>
     item.agentId && !agentIds.has(item.agentId) ? { ...item, agentId: undefined } : item);
+  const activeScenarios = activeStudioScenarios(studio);
+  const listedScenarios = activeScenariosOnly ? activeScenarios : scenarios;
+  const scrollScenarios = listedScenarios.length > 2;
+  const agentOptions = useMemo(() => [
+    { value: '', label: 'Без агента' },
+    ...agents.map(({ id, name }) => ({ value: id, label: name })),
+  ], [agents]);
   const apiConfigured = Boolean(analysisConfig?.cloud && apiKey.trim());
 
   function open(next: Overlay, event: MouseEvent<HTMLButtonElement>) {
@@ -85,7 +97,9 @@ export function AgentStudio(props: Props) {
   function close() {
     setOverlay(undefined);
     setError('');
-    requestAnimationFrame(() => (opener.current?.isConnected ? opener.current : title.current)?.focus());
+    requestAnimationFrame(() => (
+      opener.current?.isConnected ? opener.current : activeScenariosOnly ? scenariosTitle.current : title.current
+    )?.focus());
   }
 
   function persistSettings(update: (settings: StudioSettings) => StudioSettings) {
@@ -114,15 +128,23 @@ export function AgentStudio(props: Props) {
   }
 
   function toggleScenario(item: Scenario) {
-    persistScenarios((items) => items.map((scenario) =>
-      scenario.id === item.id ? { ...scenario, enabled: !scenario.enabled } : scenario));
+    return persistScenarios((items) => items.map((scenario) =>
+      scenario.id === item.id && item.agentId && scenario.agentId === item.agentId
+        ? { ...scenario, enabled: !item.enabled }
+        : scenario));
   }
 
   function detachScenario(item: Scenario) {
     return persistScenarios((items) => items.map((scenario) =>
       scenario.id === item.id && scenario.agentId === item.agentId
-        ? { ...scenario, agentId: undefined }
+        ? { ...scenario, agentId: undefined, enabled: false }
         : scenario));
+  }
+
+  function assignScenario(item: Scenario, agentId: string) {
+    if (!agentId) return detachScenario(item);
+    return persistScenarios((items) => items.map((scenario) =>
+      scenario.id === item.id ? { ...scenario, agentId, enabled: Boolean(item.agentId) && scenario.enabled } : scenario));
   }
 
   function saveScenario(settings: ScenarioSettings) {
@@ -174,8 +196,6 @@ export function AgentStudio(props: Props) {
   const localSelected = Boolean(analysisConfig && profile.provider === 'ollama');
   const apiStatus = !analysisConfig ? configStatus : !analysisConfig.cloud ? 'Недоступно на сервере'
     : !apiConfigured ? 'Нужен API-ключ' : apiSelected ? 'Выбрано' : 'Ключ добавлен';
-  const savedScenarios = scenarios.filter((scenario) => !scenario.agentId || !scenario.id.startsWith('starter-'));
-  const scrollSavedScenarios = savedScenarios.length > 2;
   let modalTitle = '';
   let modalContent: ReactNode = null;
   if (overlay?.kind === 'agent') {
@@ -185,7 +205,7 @@ export function AgentStudio(props: Props) {
       scenarios={scenarios.filter((item) => agent && item.agentId === agent.id)}
       onSave={saveAgent} onCancel={close} onDelete={deleteAgent}
       onOpenScenario={(item) => setOverlay({ kind: 'scenario-details', id: item.id })}
-      onDetachScenario={detachScenario} />;
+      onDetachScenario={detachScenario} onToggleScenario={toggleScenario} />;
   } else if (overlay?.kind === 'template') {
     const entry = templates[overlay.trigger];
     const initial: ScenarioSettings = { ...draftFrom(overlay.trigger, true), actions: ['mcp'] };
@@ -199,7 +219,8 @@ export function AgentStudio(props: Props) {
     modalContent = <ScenarioEditor key={editingId} initial={existing ?? draftFrom()} agents={agents}
       onSave={(settings) => {
         if (!existing) saveScenario(settings);
-        else if (persistScenarios((items) => items.map((item) => item.id === existing.id ? { ...item, ...settings } : item))) {
+        else if (persistScenarios((items) => items.map((item) => item.id === existing.id
+          ? { ...item, ...settings, enabled: Boolean(existing.agentId) && item.enabled } : item))) {
           close();
         }
       }} onCancel={close} />;
@@ -207,7 +228,8 @@ export function AgentStudio(props: Props) {
     const scenario = scenarios.find((item) => item.id === overlay.id);
     modalTitle = scenario?.name ?? 'Сценарий';
     modalContent = scenario ? (
-      <ScenarioDetails scenario={scenario} agent={agents.find((item) => item.id === scenario.agentId)}
+      <ScenarioDetails scenario={scenario} agentOptions={agentOptions}
+        onAgentChange={(agentId) => assignScenario(scenario, agentId)}
         integrations={integrations} onDelete={() => deleteScenario(scenario)}
         onEdit={() => setOverlay({ kind: 'scenario-edit', id: scenario.id })} />
     ) : <p className="studio-dialog-copy">Сценарий недоступен.</p>;
@@ -244,7 +266,7 @@ export function AgentStudio(props: Props) {
       <AgentCards
         cards={agents.map(({ id, name }) => ({
           id, name,
-          activeScenarioCount: scenarios.filter((item) => item.agentId === id && item.enabled).length,
+          activeScenarioCount: activeScenarios.filter((item) => item.agentId === id).length,
         }))}
         onOpen={(id, event) => open({ kind: 'agent', id }, event)}
         onAdd={(event) => open({ kind: 'agent' }, event)} />
@@ -279,29 +301,42 @@ export function AgentStudio(props: Props) {
               );
             })}
           </div>
-          {savedScenarios.length > 0 && (
-            <section className="studio-saved" aria-labelledby="saved-scenarios-title">
-              <header className="studio-saved-header">
-                <h3 id="saved-scenarios-title">Сохранённые сценарии</h3>
-                <span className="studio-saved-count">{savedScenarios.length}</span>
-              </header>
-              <div className="studio-list" data-scrollable={scrollSavedScenarios}
-                tabIndex={scrollSavedScenarios ? 0 : undefined}
-                role={scrollSavedScenarios ? 'region' : undefined}
-                aria-label={scrollSavedScenarios ? 'Список сохранённых сценариев' : undefined}>
-                {savedScenarios.map((item) => (
-                  <div className="studio-saved-row" key={item.id}>
-                    <button className="studio-row" type="button" aria-haspopup="dialog"
-                      onClick={(event) => open({ kind: 'scenario-details', id: item.id }, event)}>
-                      <strong className="studio-item-title" title={item.name}>{item.name}</strong>
-                      <span className="studio-item-meta">{agents.find((agent) => agent.id === item.agentId)?.name ?? 'Без агента'}</span>
-                    </button>
-                    <ScenarioSwitch scenario={item} onToggle={toggleScenario} />
-                  </div>
-                ))}
+          <section className="studio-saved" aria-labelledby="saved-scenarios-title">
+            <header className="studio-saved-header">
+              <h3 id="saved-scenarios-title" ref={scenariosTitle} tabIndex={-1}>Сохранённые сценарии</h3>
+              <span className="studio-saved-count" aria-live="polite">{listedScenarios.length}</span>
+              <label className="studio-scenario-filter">
+                <input ref={activeFilter} type="checkbox" checked={activeScenariosOnly}
+                  onChange={(event) => onActiveScenariosOnlyChange(event.target.checked)} />
+                Только активные
+              </label>
+            </header>
+            {listedScenarios.length ? (
+              <div className="studio-list" data-scrollable={scrollScenarios}
+                tabIndex={scrollScenarios ? 0 : undefined}
+                role={scrollScenarios ? 'region' : undefined}
+                aria-label={scrollScenarios ? 'Список сохранённых сценариев' : undefined}>
+                {listedScenarios.map((item) => {
+                  const agent = agents.find(({ id }) => id === item.agentId);
+                  const status = agent ? `${agent.name} · ${item.enabled ? 'Включён' : 'На паузе'}` : 'Без агента';
+                  return (
+                    <div className="studio-saved-row" key={item.id}>
+                      <button className="studio-row" type="button" aria-haspopup="dialog"
+                        onClick={(event) => open({ kind: 'scenario-details', id: item.id }, event)}>
+                        <strong className="studio-item-title" title={item.name}>{item.name}</strong>
+                        <span className="studio-item-meta" title={status}>{status}</span>
+                      </button>
+                      {agent && <ScenarioSwitch scenario={item} onToggle={() => {
+                        if (toggleScenario(item) && activeScenariosOnly) activeFilter.current?.focus();
+                      }} />}
+                    </div>
+                  );
+                })}
               </div>
-            </section>
-          )}
+            ) : (
+              <p className="studio-item-meta">{activeScenariosOnly ? 'Нет активных сценариев.' : 'Пока нет сохранённых сценариев.'}</p>
+            )}
+          </section>
         </section>
 
         <section className="studio-connections" aria-labelledby="connections-title">
@@ -461,9 +496,10 @@ function TemplateScenario({ initial, description, agents, telegramConnected, onS
   );
 }
 
-function ScenarioDetails({ scenario, agent, integrations, onDelete, onEdit }: {
+function ScenarioDetails({ scenario, agentOptions, onAgentChange, integrations, onDelete, onEdit }: {
   scenario: Scenario;
-  agent?: StudioAgent;
+  agentOptions: { value: string; label: string }[];
+  onAgentChange: (agentId: string) => void;
   integrations: ExtraIntegration[];
   onDelete: () => void;
   onEdit: () => void;
@@ -542,7 +578,8 @@ function ScenarioDetails({ scenario, agent, integrations, onDelete, onEdit }: {
       <dl className="studio-scenario-meta">
         <div>
           <dt>Агент</dt>
-          <dd>{agent?.name ?? 'Без агента'}</dd>
+          <dd><SpringDropdown floating label="Агент" options={agentOptions} value={scenario.agentId ?? ''}
+            onChange={onAgentChange} /></dd>
         </div>
         <div>
           <dt>Уведомления</dt>
@@ -579,7 +616,8 @@ const agentProviderOptions = [
   { value: 'cloud', label: 'Через API' },
 ] as const;
 
-function AgentSettings({ agent, error, scenarios, onSave, onCancel, onDelete, onClearError, onOpenScenario, onDetachScenario }: {
+function AgentSettings({ agent, error, scenarios, onSave, onCancel, onDelete, onClearError,
+  onOpenScenario, onDetachScenario, onToggleScenario }: {
   agent?: StudioAgent;
   error: string;
   scenarios: Scenario[];
@@ -589,6 +627,7 @@ function AgentSettings({ agent, error, scenarios, onSave, onCancel, onDelete, on
   onClearError: () => void;
   onOpenScenario: (scenario: Scenario) => void;
   onDetachScenario: (scenario: Scenario) => boolean;
+  onToggleScenario: (scenario: Scenario) => void;
 }) {
   const [provider, setProvider] = useState<StudioAgent['provider']>(agent?.provider ?? 'ollama');
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -637,10 +676,12 @@ function AgentSettings({ agent, error, scenarios, onSave, onCancel, onDelete, on
             {scenarios.length === 0 && <p>Выберите шаблон или свой workflow в библиотеке и назначьте его этому агенту.</p>}
             {scenarios.map((item) => (
               <div className="studio-assigned-row" key={item.id}>
-                <button className="studio-text-button" type="button" onClick={() => onOpenScenario(item)}>
-                  <strong>{item.name}</strong><span>{describeTrigger(item)}</span>
+                <button className="studio-text-button" type="button" title={item.name} onClick={() => onOpenScenario(item)}>
+                  <strong>{item.name}</strong>
                 </button>
+                <ScenarioSwitch scenario={item} onToggle={onToggleScenario} />
                 <button className="studio-detach-scenario" type="button" aria-label={`Отвязать сценарий «${item.name}»`}
+                  title="Отвязать сценарий"
                   onClick={() => {
                     if (onDetachScenario(item)) scenariosTitle.current?.focus();
                   }}>

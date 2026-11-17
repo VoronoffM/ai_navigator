@@ -1,5 +1,4 @@
-import { symbols } from './market';
-import { draftFrom, readScenarios, storageKey, type Scenario, type ScenarioSettings } from './scenarios';
+import { draftFrom, readScenarios, storageKey, type Scenario } from './scenarios';
 
 export type StudioAgent = {
   id: string;
@@ -27,36 +26,25 @@ export const starterAgents: StudioAgent[] = [
 ];
 
 export function starterScenarios(): Scenario[] {
-  const presets: { agent: number; settings: ScenarioSettings }[] = [
+  return [
     {
-      agent: 0,
-      settings: { ...draftFrom('price-z', true), name: 'Аномальное падение цены', direction: 'down' },
+      ...draftFrom('price-z', true),
+      id: 'starter-0',
+      name: 'Аномальное падение цены',
+      agentId: starterAgents[0].id,
+      assets: ['GAZP'],
+      direction: 'down',
+      enabled: true,
     },
     {
-      agent: 0,
-      settings: { ...draftFrom('volume-spike', true), name: 'Резкий рост объёмов' },
-    },
-    {
-      agent: 1,
-      settings: { ...draftFrom('news', true), name: 'Анализ рыночных новостей' },
-    },
-    {
-      agent: 2,
-      settings: {
-        ...draftFrom('price-z', true),
-        name: 'Мониторинг портфеля',
-        assets: symbols.map(({ ticker }) => ticker),
-        instructions: 'Сопоставь движения выбранных бумаг, отметь наиболее заметные изменения и возможные причины.',
-      },
+      ...draftFrom('volume-spike', true),
+      id: 'starter-1',
+      name: 'Резкий рост объёмов',
+      agentId: starterAgents[0].id,
+      assets: ['GAZP'],
+      enabled: false,
     },
   ];
-  return presets.map(({ agent, settings }, index) => ({
-    ...settings,
-    id: `starter-${index}`,
-    agentId: starterAgents[agent].id,
-    assets: settings.assets.length ? settings.assets : ['GAZP'],
-    enabled: true,
-  }));
 }
 
 export function readStudioSettings(): StudioSettings {
@@ -79,6 +67,11 @@ export function readStudioSettings(): StudioSettings {
 
 export function readStudioScenarios() {
   return localStorage.getItem(storageKey) === null ? starterScenarios() : readScenarios();
+}
+
+export function activeStudioScenarios({ settings, scenarios }: StudioState) {
+  const agentIds = new Set(settings.agents.map(({ id }) => id));
+  return scenarios.filter(({ enabled, agentId }) => enabled && agentId && agentIds.has(agentId));
 }
 
 export function loadStudio(): StudioState {

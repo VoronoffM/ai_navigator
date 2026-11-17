@@ -294,6 +294,10 @@ h2, h3 { font-size: var(--text-section); line-height: 1.3; font-weight: var(--we
   font-size: var(--text-meta);
   letter-spacing: 0;
 }
+.scenario-monitor-scope {
+  color: var(--muted);
+  font-size: var(--text-caption);
+}
 .scenario-monitor-manage {
   min-height: 44px;
   margin-left: auto;

@@ -75,6 +75,8 @@ export function ScenarioEditor({ initial, agents, onSave, onCancel }: {
   const [step, setStep] = useState(0);
   const [error, setError] = useState('');
   const stepHeading = useRef<HTMLHeadingElement>(null);
+  const customModelDialog = useRef<HTMLDialogElement>(null);
+  const customModelAcknowledge = useRef<HTMLButtonElement>(null);
   const checks = draft.checks ?? defaultScenarioChecks;
   const actions = draft.actions ?? ['mcp'];
   const [dragging, setDragging] = useState<SourceAction>();
@@ -189,10 +191,6 @@ export function ScenarioEditor({ initial, agents, onSave, onCancel }: {
                 </label>
               </div>
             )}
-            <details className="studio-custom-trigger">
-              <summary>Добавить свою модель</summary>
-              <p>Свои модели пока недоступны. Выберите готовую модель, чтобы сохранить сценарий.</p>
-            </details>
           </>
         )}
         {step === 2 && (
@@ -303,18 +301,50 @@ export function ScenarioEditor({ initial, agents, onSave, onCancel }: {
           </>
         )}
         {error && <p className="studio-error" role="alert">{error}</p>}
-        <div className="studio-actions">
-          <button className="button button-stop" type="button" onClick={() => {
-            if (step === 0) onCancel();
-            else setStep(step - 1);
-          }}>
-            {step > 0 && <ArrowLeft size={16} aria-hidden="true" />}{step === 0 ? 'Отмена' : 'Назад'}
-          </button>
-          <button className="button button-primary" type="submit">
-            {step === steps.length - 1 ? 'Сохранить сценарий' : <>Далее <ArrowRight size={16} aria-hidden="true" /></>}
-          </button>
+        <div className={step === 1 ? 'studio-signal-footer' : undefined}>
+          {step === 1 && (
+            <button className="studio-custom-trigger" type="button" aria-haspopup="dialog"
+              onClick={() => {
+                customModelDialog.current?.showModal();
+                customModelAcknowledge.current?.focus();
+              }}>
+              <Plus size={16} aria-hidden="true" /> Добавить свою модель
+            </button>
+          )}
+          <div className="studio-actions">
+            <button className="button button-stop" type="button" onClick={() => {
+              if (step === 0) onCancel();
+              else setStep(step - 1);
+            }}>
+              {step > 0 && <ArrowLeft size={16} aria-hidden="true" />}{step === 0 ? 'Отмена' : 'Назад'}
+            </button>
+            <button className="button button-primary" type="submit">
+              {step === steps.length - 1 ? 'Сохранить сценарий' : <>Далее <ArrowRight size={16} aria-hidden="true" /></>}
+            </button>
+          </div>
         </div>
       </form>
+      {step === 1 && (
+        <dialog className="studio-dialog studio-model-info" ref={customModelDialog}
+          aria-labelledby="custom-model-title" aria-describedby="custom-model-description">
+          <header>
+            <h2 id="custom-model-title">Своя модель</h2>
+            <button className="icon-button studio-model-info-close" type="button" aria-label="Закрыть"
+              onClick={() => customModelDialog.current?.close()}>
+              <X size={16} aria-hidden="true" />
+            </button>
+          </header>
+          <p className="studio-dialog-copy" id="custom-model-description">
+            Подключение своих моделей пока недоступно. Вы можете выбрать одну из готовых моделей
+          </p>
+          <footer className="studio-actions">
+            <button className="button button-stop" type="button" ref={customModelAcknowledge}
+              onClick={() => customModelDialog.current?.close()}>
+              Понятно
+            </button>
+          </footer>
+        </dialog>
+      )}
     </div>
   );
 }

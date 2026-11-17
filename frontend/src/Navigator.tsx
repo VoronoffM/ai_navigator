@@ -6,7 +6,7 @@ import { SiriOrb } from './SiriOrb';
 import { useAnalysis, type Profile } from './analysis';
 import { matchesReplayScenario, type ReplayEvent } from './replay';
 import { defaultScenarioChecks } from './scenarios';
-import { agentPalette, type StudioState } from './studioSettings';
+import { activeStudioScenarios, agentPalette, type StudioState } from './studioSettings';
 
 const percent = new Intl.NumberFormat('ru-RU', {
   style: 'percent', signDisplay: 'exceptZero', maximumFractionDigits: 2,
@@ -148,16 +148,18 @@ function ScenarioMonitor({ studio, onOpenStudio }: {
   studio: StudioState;
   onOpenStudio: () => void;
 }) {
-  const agentIds = new Set(studio.settings.agents.map((agent) => agent.id));
-  const count = studio.scenarios.filter(({ enabled, agentId }) => enabled && agentId && agentIds.has(agentId)).length;
+  const count = activeStudioScenarios(studio).length;
   const hasIssue = studio.issues.length > 0;
   const countLabel = scenarioCountLabels[scenarioPlural.select(count)] ?? 'активных сценариев';
 
   return (
     <section className="scenario-monitor" aria-labelledby="scenario-monitor-title">
-      <h3 id="scenario-monitor-title" className="figures" aria-live="polite" aria-atomic="true">
-        {hasIssue ? 'Сценарии' : `${count} ${countLabel}`}
-      </h3>
+      <div>
+        <h3 id="scenario-monitor-title" className="figures" aria-live="polite" aria-atomic="true">
+          {hasIssue ? 'Сценарии' : `${count} ${countLabel}`}
+        </h3>
+        <p className="scenario-monitor-scope">В Agent Studio</p>
+      </div>
       <button className="scenario-monitor-manage" type="button" onClick={onOpenStudio}
         aria-label="Управлять сценариями в Agent Studio">Управлять</button>
     </section>
