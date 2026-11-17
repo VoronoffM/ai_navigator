@@ -294,10 +294,6 @@ h2, h3 { font-size: var(--text-section); line-height: 1.3; font-weight: var(--we
   font-size: var(--text-meta);
   letter-spacing: 0;
 }
-.scenario-monitor-scope {
-  color: var(--muted);
-  font-size: var(--text-caption);
-}
 .scenario-monitor-manage {
   min-height: 44px;
   margin-left: auto;
@@ -364,7 +360,6 @@ h2, h3 { font-size: var(--text-section); line-height: 1.3; font-weight: var(--we
   border-top: 1px solid var(--line);
 }
 .replay-controls .button { width: auto; margin: 0; font-size: var(--text-meta); }
-.replay-caption { color: var(--muted); font-size: var(--text-caption); }
 .navigator-event {
   margin-inline: var(--navigator-padding);
   padding-block: var(--space-3) var(--space-4);

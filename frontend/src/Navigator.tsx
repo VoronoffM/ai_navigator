@@ -138,7 +138,6 @@ export function Navigator({ event, profile, apiKey, runId, running, replay, load
           <PlayIcon size={15} aria-hidden="true" />
           {canStop ? 'Остановить' : issue ? 'Повторить загрузку' : replay ? 'Повторить эпизод' : 'Воспроизвести эпизод'}
         </button>
-        {!replay && <span className="replay-caption">GAZP · 22 мая 2025</span>}
       </div>
     </aside>
   );
@@ -154,12 +153,9 @@ function ScenarioMonitor({ studio, onOpenStudio }: {
 
   return (
     <section className="scenario-monitor" aria-labelledby="scenario-monitor-title">
-      <div>
-        <h3 id="scenario-monitor-title" className="figures" aria-live="polite" aria-atomic="true">
-          {hasIssue ? 'Сценарии' : `${count} ${countLabel}`}
-        </h3>
-        <p className="scenario-monitor-scope">В Agent Studio</p>
-      </div>
+      <h3 id="scenario-monitor-title" className="figures" aria-live="polite" aria-atomic="true">
+        {hasIssue ? 'Сценарии' : `${count} ${countLabel}`}
+      </h3>
       <button className="scenario-monitor-manage" type="button" onClick={onOpenStudio}
         aria-label="Управлять сценариями в Agent Studio">Управлять</button>
     </section>

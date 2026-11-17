@@ -6,9 +6,9 @@ const themeKey = 'ai-navigator.theme';
 
 export function readTheme(): Theme {
   try {
-    return localStorage.getItem(themeKey) === 'light' ? 'light' : 'dark';
+    return localStorage.getItem(themeKey) === 'dark' ? 'dark' : 'light';
   } catch {
-    return 'dark';
+    return 'light';
   }
 }
 
