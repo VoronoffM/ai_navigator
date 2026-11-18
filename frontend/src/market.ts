@@ -8,7 +8,14 @@ export const symbols = [
   { ticker: 'ROSN', name: 'Роснефть', logo: '/logos/rosn.png' },
 ] as const;
 
-export type Ticker = (typeof symbols)[number]['ticker'];
+export const replaySymbols = [
+  { ticker: 'VTBR', name: 'ВТБ', logo: '/logos/vtbr.svg' },
+  { ticker: 'BELU', name: 'НоваБев Групп', logo: '/logos/belu.svg' },
+  { ticker: 'DEMO', name: 'Учебный инструмент', logo: '/logos/demo.svg' },
+] as const;
+export const allSymbols = [...symbols, ...replaySymbols];
+
+export type Ticker = (typeof allSymbols)[number]['ticker'];
 export type Interval = '1h' | '1d';
 export type Issue = { code: string; message: string };
 export type QuoteRow = {

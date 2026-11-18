@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { SourceAction } from './scenarios';
+import type { ResearchSource, SourceAction } from './scenarios';
 
 export type CheckName = 'news' | 'market' | 'dividends' | 'reports';
 export type Profile = {
@@ -8,7 +8,7 @@ export type Profile = {
   apiUrl?: string;
   cloudModel?: string;
   checks?: CheckName[];
-  workflow?: { actions: SourceAction[]; depth: 'brief' | 'detailed'; instructions: string };
+  workflow?: { actions: SourceAction[]; depth: 'brief' | 'detailed'; instructions: string; sources?: ResearchSource[] };
 };
 export type AnalysisConfig = {
   models: string[];
@@ -17,7 +17,9 @@ export type AnalysisConfig = {
   defaults: { model: string; checks: CheckName[] };
 };
 
-type Material = {
+export type InformationKind = 'fact' | 'ai_analysis' | 'opinion' | 'unverified';
+
+export type Material = {
   id: string;
   source: string | null;
   publishedAt: string;
@@ -25,6 +27,7 @@ type Material = {
   text: string | null;
   url: string | null;
   headlineOnly: boolean;
+  kind?: Exclude<InformationKind, 'ai_analysis'>;
 };
 
 export type CheckStatus = 'ok' | 'empty' | 'unavailable' | 'disabled';
@@ -35,16 +38,19 @@ type CheckResult<Facts = Record<string, never>> = {
   facts: Facts;
 };
 
-type Citation = Pick<Material, 'id' | 'title' | 'source' | 'url'>;
-export type Statement = { text: string; citations: Citation[] };
+export type Citation = Pick<Material, 'id' | 'title' | 'source' | 'url'>;
+export type Statement = { text: string; citations: Citation[]; kind?: InformationKind };
 type Job = { id: string; event_id: string };
 export type ScenarioDelivery = { run_id: string; scenario_id: string; name: string };
 type AnalysisActivity = {
+  dataSource?: string;
+  synthetic?: boolean;
   telegram?: 'pending' | 'sent' | 'failed' | 'unconnected';
   actions?: SourceAction[];
   requestedChecks?: CheckName[];
   completedChecks?: Partial<Record<CheckName, CheckStatus>>;
   completedActions?: SourceAction[];
+  sources?: (CheckResult & { url: string; instructions: string })[];
   cbr?: CheckResult;
 };
 export type AnalysisResult = Job & AnalysisActivity & {
@@ -61,7 +67,7 @@ export type AnalysisResult = Job & AnalysisActivity & {
   } | null;
   checks: {
     news: CheckResult;
-    market: CheckResult<{ comparison?: { changePercent: number } }>;
+    market: CheckResult<{ comparison?: { changePercent: number; ticker?: string } }>;
     dividends: CheckResult<{
       recommendation?: string;
       materialId?: string;

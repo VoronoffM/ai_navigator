@@ -4,12 +4,13 @@ from math import sqrt
 from statistics import mean, median, stdev
 
 
-def replay_scores(history, candles, index_candles, start, hour, timezone):
+def replay_scores(history, candles, index_candles, start, hour, timezone, ticker="GAZP"):
     """Score each closed replay candle against observations strictly before it."""
-    prices = {time: close for time, close, _ in history["GAZP"]}
-    volumes = {time: volume for time, _, volume in history["GAZP"]}
+    prices = {time: close for time, close, _ in history[ticker]}
+    volumes = {time: volume for time, _, volume in history[ticker]}
     index = dict(history["IMOEX"])
     prices.update((bar["time"], bar["close"]) for bar in candles if bar["complete"])
+    volumes.update((bar["time"], bar["volume"]) for bar in candles if bar["complete"] and "volume" in bar)
     index.update((bar["time"], bar["close"]) for bar in index_candles if bar["complete"])
     visible = {bar["time"] for bar in candles if bar["complete"] and bar["time"] >= start}
     by_hour = defaultdict(lambda: deque(maxlen=10))

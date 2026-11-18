@@ -64,6 +64,15 @@ class TelegramTests(unittest.TestCase):
         self.assertEqual(result["telegram"], "failed")
         self.assertIn("comparison", result["checks"]["market"]["facts"])
 
+    def test_removed_report_action_disables_delivery(self):
+        self.connect()
+        self.send.reset_mock()
+        response = self.client.post(self.analysis_url, json={**self.profile,
+            "workflow": {"actions": ["mcp"]}})
+        self.assertIn(response.status_code, (200, 202))
+        self.send.assert_not_awaited()
+        self.assertNotIn("telegram", response.json())
+
     def test_report_includes_analysis_and_source(self):
         self.connect()
         analysis = app.state.analysis

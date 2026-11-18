@@ -34,7 +34,7 @@ async def check_cbr_calendar(client: httpx.AsyncClient, event: Signal) -> CheckR
             if "ключев" not in title.lower():
                 raise ValueError("Missing decision headline")
             materials.append(Material(id=f"cbr-{moment:%Y%m%d%H%M%S}", source="Банк России",
-                                      publishedAt=moment, title=title, url=url))
+                                      publishedAt=moment, title=title, url=url, kind="fact"))
         if materials:
             return CheckResult("ok", materials=materials)
         return CheckResult("empty", "По календарю ЦБ решения по ставке в окне сигнала не было.")

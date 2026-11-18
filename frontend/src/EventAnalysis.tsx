@@ -1,10 +1,9 @@
-import type { ReactNode } from 'react';
 import { CircleAlert } from 'lucide-react';
 import { AnalysisSummary } from './AnalysisSummary';
 import { AgentSteps, type AgentStep } from './AgentSteps';
-import { marketTime, number } from './market';
+import { analysisFindings, type AnalysisFinding } from './analysisFindings';
 import type { AgentPalette } from './studioSettings';
-import type { AnalysisResult, AnalysisState, CheckName, CheckStatus, Statement } from './analysis';
+import type { AnalysisResult, AnalysisState, CheckName, CheckStatus, Citation, InformationKind } from './analysis';
 
 const checks: Record<CheckName, string> = {
   news: 'Новости', market: 'Индекс Мосбиржи', dividends: 'Дивиденды', reports: 'Отчётность',
@@ -13,29 +12,18 @@ const checkNames = Object.keys(checks) as CheckName[];
 const statuses: Record<CheckStatus, string> = {
   ok: 'Проверено', empty: 'Нет данных', unavailable: 'Недоступно', disabled: 'Пропущено',
 };
-const checkHeadlines: Record<CheckName, Record<CheckStatus, string>> = {
-  news: { ok: 'Есть новости к моменту сигнала', empty: 'Новостей не найдено', unavailable: 'Новости недоступны', disabled: 'Новости пропущены' },
-  market: { ok: 'Индекс Мосбиржи проверен', empty: 'Нет данных для сравнения', unavailable: 'Индекс недоступен', disabled: 'Сравнение с индексом пропущено' },
-  dividends: { ok: 'Есть данные о дивидендах', empty: 'Записей о выплатах нет', unavailable: 'Данные о дивидендах недоступны', disabled: 'Проверка дивидендов пропущена' },
-  reports: { ok: 'Есть сведения об отчётности', empty: 'Отчётность не найдена', unavailable: 'Отчётность недоступна', disabled: 'Проверка отчётности пропущена' },
+const findingLabels: Record<Exclude<InformationKind, 'unverified'>, string> = {
+  fact: 'Факт', ai_analysis: 'Анализ ИИ', opinion: 'Мнение',
 };
-const sourceExplanations: Record<CheckStatus, string> = {
-  ok: 'Источник проверен на момент сигнала.',
-  empty: 'В источнике нет подходящих данных к моменту сигнала.',
-  unavailable: 'Не удалось получить данные источника.',
-  disabled: 'Проверка отключена в настройках разбора.',
-};
-const percent = new Intl.NumberFormat('ru-RU', {
-  style: 'percent', signDisplay: 'exceptZero', maximumFractionDigits: 2,
-});
 
-function Citations({ items }: { items: Statement['citations'] }) {
-  if (items.length === 0) return null;
+function Citations({ items }: { items: Citation[] }) {
+  const attributed = items.filter((item) => item.source || item.url);
+  if (attributed.length === 0) return null;
 
-  return <span className="event-citations">{items.map((source) => source.url
+  return <span className="event-citations">{attributed.map((source) => source.url
     ? <a key={source.id} href={source.url} target="_blank" rel="noopener noreferrer"
         title={source.title}>{source.source ?? 'Источник'}</a>
-    : <span key={source.id} title={source.title}>{source.source ?? source.title}</span>)}</span>;
+    : <span key={source.id} title={source.title}>{source.source}</span>)}</span>;
 }
 
 type AgentIdentity = { agentName?: string; palette?: AgentPalette };
@@ -72,7 +60,7 @@ function activitySteps(state: Exclude<AnalysisState, { status: 'error' }>): Agen
       const children: AgentStep[] = names.map((name) => {
         const result = finished ? state.checks[name].status : state.completedChecks?.[name];
         return {
-          id: name, label: checks[name],
+          id: name, label: state.synthetic && name === 'market' ? 'Учебный индекс' : checks[name],
           status: result === 'unavailable' ? 'failed' : result ? 'done' : 'pending',
           note: result && statuses[result],
         };
@@ -80,12 +68,21 @@ function activitySteps(state: Exclude<AnalysisState, { status: 'error' }>): Agen
       const complete = state.status !== 'collecting' || state.completedActions?.includes('mcp');
       const failed = children.filter((step) => step.status === 'failed').length;
       steps.push({
-        id: 'mcp', label: 'T-Invest MCP', children,
+        id: 'mcp', label: state.dataSource ?? 'T-Invest MCP', children,
         status: complete ? (children.length && failed === children.length ? 'failed' : 'done')
           : active === 'mcp' ? 'running' : 'pending',
         note: failed > 0 && failed < children.length ? 'Частично' : undefined,
       });
-    } else {
+    } else if (action === 'source') {
+      const complete = state.status !== 'collecting' || state.completedActions?.includes('source');
+      const children: AgentStep[] = (state.sources ?? []).map((source, index) => ({
+        id: `source-${index}`, label: source.url,
+        status: source.status === 'unavailable' ? 'failed' : 'done', note: source.reason ?? statuses[source.status],
+      }));
+      steps.push({ id: 'source', label: 'Изучить источник', children,
+        status: complete ? (children.length > 0 && children.every((child) => child.status === 'failed') ? 'failed' : 'done')
+          : active === 'source' ? 'running' : 'pending' });
+    } else if (action === 'cbr') {
       const result = state.cbr?.status;
       steps.push({
         id: 'cbr', label: 'Календарь ЦБ',
@@ -104,84 +101,57 @@ function activitySteps(state: Exclude<AnalysisState, { status: 'error' }>): Agen
     id: 'synthesis', label: 'ИИ-разбор', status: synthesisStatus,
     note: synthesisStatus === 'skipped' ? 'Пропущено' : synthesisStatus === 'failed' ? 'Ошибка модели' : undefined,
   });
+  if (actions.includes('report')) steps.push({
+    id: 'report', label: 'Отправка отчета',
+    status: state.telegram === 'failed' || state.telegram === 'unconnected' ? 'failed'
+      : state.telegram === 'pending' ? 'running' : finished ? 'done' : 'pending',
+    note: state.telegram === 'sent' ? 'Telegram' : state.telegram === 'unconnected' ? 'Telegram не подключён' : undefined,
+  });
   return steps;
 }
 
 function AnalysisDetails({ state, agentName, palette }: { state: AnalysisResult } & AgentIdentity) {
-  const comparison = state.checks.market.facts.comparison;
-  const dividends = state.checks.dividends.facts;
-  const { cbr } = state;
-  const sources = [...Object.values(state.checks), ...(cbr ? [cbr] : [])];
-  const materials = [...new Map(sources.flatMap(({ materials }) =>
-    materials.map((item) => [item.id, item] as const))).values()];
-  const recommendation = dividends.recommendation;
-  const recommendationSource = materials.find((item) => item.id === dividends.materialId);
-  const calendar = state.checks.reports.facts.calendar ?? [];
-  const news = state.checks.news.materials[0];
-  const headlines: Partial<Record<CheckName, string>> = {
-    market: comparison && `Индекс Мосбиржи ${percent.format(comparison.changePercent / 100)}`,
-    dividends: recommendation,
-  };
-  const findings: Partial<Record<CheckName, ReactNode>> = {
-    news: news?.title,
-    market: comparison && 'Изменение индекса за тот же час.',
-    dividends: (recommendationSource || Boolean(dividends.payments?.length)) && <>
-      {recommendationSource && <p>
-        {recommendationSource.source ?? 'Опубликовано'} · {marketTime(recommendationSource.publishedAt)}
-      </p>}
-      {dividends.payments?.map((item) => <p key={item.materialId}>
-        {number.format(item.amount)} {item.currency.toUpperCase()} на акцию · объявлено {item.declaredDate} · последний день покупки {item.lastBuyDate}
-        {item.possibleDividendGap && <>. Размер выплаты близок к ценовому разрыву и может его объяснять.</>}
-      </p>)}
-    </>,
-    reports: calendar.length > 0
-      ? calendar.map((item) => <p key={item.createdAt}>Дата в календаре · {item.scheduledDate}</p>)
-      : state.checks.reports.materials[0]?.title,
-  };
-
   const { synthesis } = state;
+  const dividends = state.checks.dividends.facts;
+  const recommendation = dividends.recommendation;
   const modelSummary = synthesis?.summary ?? synthesis?.hypotheses[0]?.text ?? synthesis?.facts[0]?.text;
+  const firstMaterial = state.checks.news.materials[0];
+  const noContext = state.checks.news.status === 'unavailable'
+    ? 'Движение цены обнаружено, но новостная лента недоступна. Подтверждённую причину определить нельзя.'
+    : 'Движение цены обнаружено. В сохранённых материалах подтверждённая причина не установлена; это само по себе не доказывает рыночный шум.';
   const summary = modelSummary ?? (recommendation && state.checks.news.materials.some((item) => item.id === dividends.materialId)
     ? `${recommendation} Публикация в час сигнала даёт возможное объяснение движению цены.`
-    : 'Доступных данных недостаточно, чтобы объяснить движение цены.');
+    : firstMaterial ? `${firstMaterial.text ?? firstMaterial.title}${firstMaterial.kind === 'unverified' ? ' Связь с движением цены не подтверждена.' : ''}` : noContext);
   const evidence = synthesis?.evidenceChecks ?? [];
   const completedChecks = checkNames.filter((name) => synthesis?.summary
     ? evidence.includes(name)
     : !modelSummary && state.checks[name].status !== 'disabled');
-  const citedFacts = synthesis?.facts.length ? synthesis.facts : synthesis?.hypotheses.slice(0, 1) ?? [];
-  const showCbr = cbr && (!modelSummary || evidence.includes('cbr'));
+  const findings = analysisFindings(state, completedChecks, !modelSummary || evidence.includes('cbr'));
 
   return (
     <AnalysisSummary title={modelSummary ? 'ИИ-разбор' : 'Сводка по источникам'}
       summary={summary} reason={state.reason} agentName={agentName} palette={palette}
+      disclaimer={modelSummary ? 'Не индивидуальная инвестиционная рекомендация' : undefined}
       activity={<AgentSteps steps={activitySteps(state)} initiallyOpen={false} />}>
-      {(citedFacts.length > 0 || completedChecks.length > 0 || showCbr) && <div className="event-findings">
-        {citedFacts.map((fact, index) => <FindingCard key={index} title={fact.text}>
-          <Citations items={fact.citations} />
-        </FindingCard>)}
-        {completedChecks.map((name) => {
-          const { status, reason } = state.checks[name];
-          const finding = findings[name];
-          const explanation = (status !== 'ok' || name === 'reports') ? reason : null;
-          return <FindingCard key={name} title={headlines[name] ?? checkHeadlines[name][status]}>
-            {explanation && <p>{explanation}</p>}
-            {finding || (!explanation && sourceExplanations[status])}
-          </FindingCard>;
-        })}
-        {showCbr && <FindingCard title="Проверка календаря ЦБ">
-          {cbr.reason ?? (cbr.materials.map((item) => item.title).join('. ') || sourceExplanations[cbr.status])}
-        </FindingCard>}
+      {findings.length > 0 && <div className="event-findings">
+        {findings.map((finding) => <FindingCard key={finding.id} finding={finding} />)}
       </div>}
     </AnalysisSummary>
   );
 }
 
-function FindingCard({ title, children }: {
-  title: string;
-  children: ReactNode;
-}) {
+function FindingCard({ finding }: { finding: AnalysisFinding }) {
+  const { title, kind, paragraphs, citations } = finding;
+  const label = kind === 'unverified' ? undefined : findingLabels[kind];
+
   return <div className="event-finding-card">
-    <strong>{title}</strong>
-    <div className="event-finding-explanation">{children}</div>
+    <div className="event-finding-heading">
+      <strong>{title}</strong>
+      {label && <span className="event-finding-badge" data-kind={kind}>{label}</span>}
+    </div>
+    <div className="event-finding-explanation">
+      {paragraphs?.map((paragraph, index) => <p key={index}>{paragraph}</p>)}
+      {citations && <Citations items={citations} />}
+    </div>
   </div>;
 }

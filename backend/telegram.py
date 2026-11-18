@@ -67,15 +67,16 @@ async def send_message(settings: TelegramSettings, text: str) -> None:
 
 def report_text(event: Signal, scenario: ScenarioDelivery, result: dict) -> str:
     movement = f"{event.changePercent:+.2f}".replace(".", ",")
+    mode = "симуляция · вымышленные данные" if event.synthetic else "исторический эпизод"
     lines = [
         f"AI Штурман · {scenario.name}",
-        f"{event.ticker} {movement}% · {event.detectedAt:%d.%m.%Y %H:%M} МСК (исторический эпизод)",
+        f"{event.ticker} {movement}% · {event.detectedAt:%d.%m.%Y %H:%M} МСК ({mode})",
     ]
     synthesis = result["synthesis"]
     if synthesis:
         if synthesis["summary"]:
             lines.extend(["", synthesis["summary"]])
-        for group, title in (("facts", "Факты"), ("hypotheses", "Возможные причины"), ("questions", "Что проверить")):
+        for group, title in (("facts", "По материалам"), ("hypotheses", "Возможные причины"), ("questions", "Что проверить")):
             if synthesis[group]:
                 lines.extend(["", title])
                 lines.extend(f"• {item if isinstance(item, str) else item['text']}" for item in synthesis[group])
@@ -90,7 +91,8 @@ def report_text(event: Signal, scenario: ScenarioDelivery, result: dict) -> str:
         comparison = checks["market"]["facts"].get("comparison")
         if comparison:
             change = f"{comparison['changePercent']:+.2f}".replace(".", ",")
-            lines.append(f"• IMOEX {change}% за тот же час")
+            label = "Учебный индекс" if event.synthetic else "IMOEX"
+            lines.append(f"• {label} {change}% за тот же час")
         for check in (checks["news"], checks["dividends"], checks["reports"], result.get("cbr")):
             if check and check["status"] != "disabled":
                 titles = [item["title"] for item in check["materials"]]

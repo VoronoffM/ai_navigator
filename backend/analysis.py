@@ -11,19 +11,21 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from backend.llm import DEFAULT_CLOUD_URL, OPENAI_MODEL, CloudProvider, LLMProvider, ProviderError, cloud_endpoint
 from backend.replay import Signal
-from backend.signal_checks import CHECKS, Check, CheckName, CheckResult, Material
+from backend.sources import ResearchSource, check_source
+from backend.signal_checks import CHECKS, Check, CheckName, CheckResult, InformationKind, Material
 
 logger = logging.getLogger(__name__)
 CHECK_TIMEOUT = 4
 COLLECTION_TIMEOUT = 6
 LLM_TIMEOUT = 45
-SourceAction = Literal["mcp", "cbr"]
+SourceAction = Literal["mcp", "cbr", "source", "report"]
 EvidenceCheck = Literal["news", "market", "dividends", "reports", "cbr"]
 
 
 class Workflow(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    actions: tuple[SourceAction, ...] = Field(min_length=1, max_length=2)
+    actions: tuple[SourceAction, ...] = Field(min_length=1, max_length=4)
+    sources: list[ResearchSource] = Field(default_factory=list, max_length=5)
     depth: Literal["brief", "detailed"] = "brief"
     instructions: str = Field(default="", max_length=1000)
 
@@ -81,8 +83,16 @@ def resolve_citations(raw: str, materials: dict[str, Material],
             if any(item.headline_only for item in cited):
                 if group != "facts" or len(cited) != 1 or statement.text != cited[0].title:
                     raise ValueError("Unsupported headline-only claim")
+            kind: InformationKind = "unverified"
+            if len(cited) == 1 and statement.text in (cited[0].title, cited[0].text):
+                kind = cited[0].kind
+            elif group == "hypotheses":
+                kind = "ai_analysis"
+            elif all(item.kind == "opinion" for item in cited):
+                kind = "opinion"
             result[group].append({
                 "text": statement.text,
+                "kind": kind,
                 "citations": [{"id": item.id, "source": item.source, "title": item.title, "url": item.url}
                               for item in cited],
             })
@@ -103,7 +113,7 @@ class AnalysisService:
         if self.default_model not in self.models:
             raise ValueError("ANALYSIS_DEFAULT_MODEL must be included in ANALYSIS_MODELS")
         self.jobs: dict[str, dict] = {}
-        self.job_keys: dict[tuple[str, str, str, str, tuple[CheckName, ...], bytes, str], str] = {}
+        self.job_keys: dict[tuple, str] = {}
         self.tasks: set[asyncio.Task] = set()
         self.running_jobs: dict[str, asyncio.Task] = {}
 
@@ -141,20 +151,24 @@ class AnalysisService:
         if workflow:
             if len(set(workflow.actions)) != len(workflow.actions):
                 raise ValueError("Добавьте каждое действие один раз.")
+            if "source" in workflow.actions and not workflow.sources:
+                raise ValueError("Добавьте источник для изучения.")
             if "mcp" not in workflow.actions:
                 names = ()
             elif not names:
                 raise ValueError("Выберите хотя бы один инструмент T-Invest MCP.")
-        key = (event.event_id, mode, endpoint_key, model, names, credential_hash,
+        key = (event.event_id, event.episodeId, event.datasetVersion, mode, endpoint_key, model, names, credential_hash,
                workflow.model_dump_json() if workflow else "")
         if job_id := self.job_keys.get(key):
             job = self.jobs[job_id]
-            if job.get("llm") != "failed" and job.get("cbr", {}).get("status") != "unavailable":
+            if (job.get("llm") != "failed" and job.get("cbr", {}).get("status") != "unavailable"
+                    and not any(source["status"] == "unavailable" for source in job.get("sources", []))):
                 return job
         job_id = uuid4().hex
         self.job_keys[key] = job_id
         self.jobs[job_id] = {
             "id": job_id, "event_id": event.event_id, "status": "collecting", "requestedChecks": names,
+            "dataSource": event.dataSource or "T-Invest MCP", "synthetic": event.synthetic,
         }
         if workflow:
             self.jobs[job_id]["actions"] = workflow.actions
@@ -174,6 +188,14 @@ class AnalysisService:
         for task in self.tasks:
             task.cancel()
         await asyncio.gather(*self.tasks, return_exceptions=True)
+
+    async def archived_source(self, source: ResearchSource, event: Signal) -> CheckResult:
+        from backend.episodes import visible_materials
+        materials = [Material.model_validate(item) for item in visible_materials(event.episodeId, event.detectedAt.timestamp())
+                     if item.get("url") == source.url]
+        if materials:
+            return CheckResult("ok", materials=materials)
+        return CheckResult("unavailable", "В выбранном эпизоде нет сохранённой версии этого источника к моменту сигнала.")
 
     async def run_check(self, name: CheckName, event: Signal) -> CheckResult:
         try:
@@ -212,6 +234,7 @@ class AnalysisService:
     async def run(self, job_id: str, event: Signal, provider: LLMProvider,
                   model: str, names: tuple[CheckName, ...], workflow: Workflow | None):
         running = self.jobs[job_id]
+        archive_only = bool(event.episodeId and event.episodeId != "gazp-2025-05-22")
         result = {
             **running, "status": "done", "llm": "skipped", "synthesis": None, "reason": None,
             "checks": {name: CheckResult("unavailable" if name in names else "disabled").payload()
@@ -226,6 +249,8 @@ class AnalysisService:
 
         try:
             cbr = None
+            source_results = []
+            source_tasks = []
             if workflow is None:
                 checks = await self.collect(event, names, record_check)
             else:
@@ -234,11 +259,37 @@ class AnalysisService:
                 for action in workflow.actions:
                     if action == "mcp":
                         checks = await self.collect(event, names, record_check)
+                    elif action == "report":
+                        continue  # Delivery runs after synthesis, never during collection.
+                    elif action == "source":
+                        for source in workflow.sources:
+                            try:
+                                async with asyncio.timeout(10):
+                                    if archive_only:
+                                        checked = await self.archived_source(source, event)
+                                    elif source.kind == "cbr":
+                                        checked = await self.cbr_check(event) if self.cbr_check else CheckResult(
+                                            "unavailable", "Календарь ЦБ недоступен.")
+                                    else:
+                                        checked = await check_source(source, event)
+                            except Exception:
+                                checked = CheckResult("unavailable", "Не удалось прочитать источник.")
+                            source_results.append(checked)
+                            source_tasks.append({"url": source.url, "instructions": source.instructions,
+                                                 "status": checked.status, "reason": checked.reason,
+                                                 "materialIds": [item.id for item in checked.materials]})
+                            result["sources"] = [{**check.payload(), "url": config.url, "instructions": config.instructions}
+                                                 for check, config in zip(source_results, workflow.sources)]
+                            self.jobs[job_id] = {**self.jobs[job_id], "sources": result["sources"]}
                     else:
                         try:
                             async with asyncio.timeout(CHECK_TIMEOUT):
-                                cbr = await self.cbr_check(event) if self.cbr_check else CheckResult(
-                                    "unavailable", "Календарь Банка России недоступен.")
+                                if archive_only:
+                                    cbr = CheckResult("unavailable", "В эпизоде нет архивного календаря ЦБ.")
+                                elif self.cbr_check:
+                                    cbr = await self.cbr_check(event)
+                                else:
+                                    cbr = CheckResult("unavailable", "Календарь Банка России недоступен.")
                         except TimeoutError:
                             cbr = CheckResult("unavailable", "Банк России не ответил вовремя.")
                         result["cbr"] = cbr.payload()
@@ -248,7 +299,7 @@ class AnalysisService:
                         **({"cbr": result["cbr"]} if action == "cbr" else {}),
                     }
             result["checks"] = {name: check.payload() for name, check in checks.items()}
-            sources = list(checks.values()) + ([cbr] if cbr else [])
+            sources = list(checks.values()) + ([cbr] if cbr else []) + source_results
             materials = {item.id: item for check in sources for item in check.materials}
             if materials:
                 self.jobs[job_id] = {
@@ -262,6 +313,8 @@ class AnalysisService:
                     "coverage": {name: {"status": check.status, "reason": check.reason}
                                  for name, check in checks.items()},
                 }
+                if source_tasks:
+                    context["sourceTasks"] = source_tasks
                 if workflow:
                     context["report"] = {"format": workflow.depth, "focus": workflow.instructions}
                 if cbr:
@@ -284,4 +337,5 @@ class AnalysisService:
         except Exception as exc:
             logger.warning("Analysis %s failed (%s)", job_id, type(exc).__name__)
             result.update(llm="failed", reason="Не удалось завершить разбор.")
+        result["completedActions"] = self.jobs[job_id].get("completedActions", [])
         self.jobs[job_id] = result

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { Play, RotateCcw, Square } from 'lucide-react';
 import { number } from './market';
 import { EventAnalysis } from './EventAnalysis';
@@ -28,6 +28,7 @@ const scenarioCountLabels: Partial<Record<Intl.LDMLPluralRule, string>> = {
 
 type NavigatorProps = {
   event: ReplayEvent | null;
+  episodePicker: ReactNode;
   profile: Profile;
   apiKey: string;
   runId?: string;
@@ -50,7 +51,7 @@ const telegramStatus = {
 };
 
 export function Navigator({ event, profile, apiKey, runId, running, replay, loading, issue,
-  studio, replayStudio, onOpenStudio, onPlay, onExit }: NavigatorProps) {
+  studio, replayStudio, episodePicker, onOpenStudio, onPlay, onExit }: NavigatorProps) {
   const [selectedScenario, setSelectedScenario] = useState('');
   const agents = replayStudio?.settings.agents ?? [];
   const matching = event && replayStudio ? replayStudio.scenarios.filter((scenario) => matchesReplayScenario(scenario, event)
@@ -69,10 +70,10 @@ export function Navigator({ event, profile, apiKey, runId, running, replay, load
       ...profile,
       provider: agent.provider,
       checks: scenario.checks ?? defaultScenarioChecks,
-      workflow: { actions: scenario.actions, depth: scenario.depth, instructions: scenario.instructions },
+      workflow: { actions: scenario.actions, depth: scenario.depth, instructions: scenario.instructions, sources: scenario.sources },
     };
   }, [agent, profile, scenario]);
-  const telegram = useMemo(() => runId && matchedScenario?.notification === 'telegram'
+  const telegram = useMemo(() => runId && matchedScenario?.notification === 'telegram' && (!matchedScenario.actions || matchedScenario.actions.includes('report'))
     ? { run_id: runId, scenario_id: matchedScenario.id, name: matchedScenario.name }
     : undefined, [runId, matchedScenario]);
   const analysis = useAnalysis(event?.event_id, executionProfile, apiKey, telegram);
@@ -97,23 +98,26 @@ export function Navigator({ event, profile, apiKey, runId, running, replay, load
         </div>
       </header>
 
+      {episodePicker}
       <ScenarioMonitor studio={studio} onOpenStudio={onOpenStudio} />
 
       {(event || eventStatus) && <section className="navigator-event" aria-label="Событие">
         {event ? (
           <article className="event-card">
             <header className="event-heading">
-              <h3 aria-live="polite">{event.ticker} <span className="event-drop figures">{percent.format(event.changePercent / 100)}</span></h3>
+              <h3 aria-live="polite">{event.ticker} <span className="event-drop figures" data-positive={event.changePercent > 0}>{percent.format(event.changePercent / 100)}</span></h3>
               <p className="event-context figures">{number.format(event.previousClose)} → {number.format(event.close)} ₽</p>
               <p className="event-window figures">
-                {day.format(event.detectedAt * 1000)}, {hour.format(event.candleTime * 1000)}–{hour.format(event.detectedAt * 1000)} МСК
+                {event.comparisonKind === 'session-gap' && event.previousCloseAt
+                  ? <>Между сессиями: {day.format(event.previousSessionDate ? new Date(`${event.previousSessionDate}T12:00:00+03:00`) : event.previousCloseAt * 1000)} → {day.format(event.detectedAt * 1000)}, {hour.format(event.detectedAt * 1000)} МСК</>
+                  : <>{day.format(event.detectedAt * 1000)}, {hour.format(event.candleTime * 1000)}–{hour.format(event.detectedAt * 1000)} МСК</>}
               </p>
               {event.priceZ != null && matching.some((item) => item.trigger === 'price-z') &&
                 <p className="event-context figures">Движение цены · {scoreNumber.format(Math.abs(event.priceZ))}σ</p>}
               {event.volumeRatio != null && matching.some((item) => item.trigger === 'volume-spike') &&
                 <p className="event-context figures">Объём · {scoreNumber.format(event.volumeRatio)}× обычного</p>}
               {event.indexChangePercent != null && event.marketZ != null && matching.some((item) => item.trigger === 'relative') &&
-                <p className="event-context figures">IMOEX {percent.format(event.indexChangePercent / 100)} · разница {scoreNumber.format(event.changePercent - event.indexChangePercent)} п.п.</p>}
+                <p className="event-context figures">{event.ticker === 'DEMO' ? 'Учебный индекс' : 'IMOEX'} {percent.format(event.indexChangePercent / 100)} · разница {scoreNumber.format(event.changePercent - event.indexChangePercent)} п.п.</p>}
               {scenario && workflows.length > 1 && <label className="event-workflow">Сценарий
                 <select value={scenario.id} onChange={(change) => setSelectedScenario(change.target.value)}>
                   {workflows.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}

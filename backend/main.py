@@ -16,8 +16,9 @@ from backend.analysis import AnalysisService, Profile
 from backend.cbr import check_cbr_calendar
 from backend.llm import OllamaProvider, PublicCloudTransport
 from backend.market import SANDBOX_URL, MarketError, SandboxMarket, Ticker
-from backend.replay import Signal, gazprom_replay, gazprom_signal
-from backend.signal_checks import CHECKS, ReplayChecks
+from backend.replay import Signal, gazprom_replay
+from backend.episodes import CATALOG, catalog, episode_signal, replay_episode
+from backend.signal_checks import CHECKS, replay_check
 from backend.telegram import (
     DeliveryStatus, ScenarioDelivery, TelegramConnection, TelegramError, TelegramSettings,
     report_text, send_message, valid_token,
@@ -37,10 +38,8 @@ async def lifespan(app: FastAPI):
         httpx.AsyncClient(transport=PublicCloudTransport(), trust_env=False) as cloud_client,
     ):
         app.state.market = SandboxMarket(client, os.getenv("TBANK_TOKEN", "").strip())
-        event = gazprom_replay()["event"]
-        checks = ReplayChecks(event["news"] if event else None)
         app.state.analysis = AnalysisService(
-            OllamaProvider(client), {name: getattr(checks, name) for name in CHECKS}, cloud_client=cloud_client,
+            OllamaProvider(client), {name: partial(replay_check, name) for name in CHECKS}, cloud_client=cloud_client,
             cbr_check=partial(check_cbr_calendar, client),
         )
         try:
@@ -72,6 +71,18 @@ def get_gazprom_replay():
     return gazprom_replay()
 
 
+@app.get("/api/replay/episodes")
+def get_replay_catalog():
+    return catalog()
+
+
+@app.get("/api/replay/episodes/{episode_id}")
+def get_replay_episode(episode_id: str):
+    if episode_id not in CATALOG:
+        raise HTTPException(status_code=404, detail="Исторический эпизод не найден.")
+    return replay_episode(episode_id)
+
+
 @app.get("/api/analysis/config")
 async def analysis_config(request: Request):
     return request.app.state.analysis.config()
@@ -84,7 +95,7 @@ class AnalysisRequest(Profile):
 @app.post("/api/analysis/{event_id}")
 async def start_analysis(request: Request, event_id: str, profile: AnalysisRequest, background: BackgroundTasks,
                          authorization: Annotated[str, Header()] = ""):
-    signal = gazprom_signal(event_id)
+    signal = episode_signal(event_id)
     if signal is None:
         raise HTTPException(status_code=404, detail="Историческое событие не найдено.")
     try:
@@ -92,7 +103,7 @@ async def start_analysis(request: Request, event_id: str, profile: AnalysisReque
         job = request.app.state.analysis.start(signal, profile, key.strip() if scheme.lower() == "bearer" else "")
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    if scenario := profile.telegram:
+    if (scenario := profile.telegram) and (profile.workflow is None or "report" in profile.workflow.actions):
         connection_id = request.cookies.get(TELEGRAM_COOKIE)
         connection = request.app.state.telegram.get(connection_id)
         if connection and scenario.key not in connection.deliveries:

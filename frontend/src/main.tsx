@@ -7,13 +7,14 @@ import { AgentStudio } from './AgentStudio';
 import { CandleIntervalControl } from './CandleIntervalControl';
 import { Chart } from './Chart';
 import { Navigator } from './Navigator';
+import { EpisodePicker } from './EpisodePicker';
 import { SpringDropdown } from './SpringDropdown';
 import { ThemeSwitch, readTheme, saveTheme } from './ThemeSwitch';
 import { WorkspaceNav } from './WorkspaceNav';
 import { storageKey } from './scenarios';
 import { loadStudio, studioSettingsKey, type StudioState } from './studioSettings';
-import { marketTime, number, symbols, useMarketResource, type Candle, type Interval, type QuoteRow, type Ticker } from './market';
-import { matchesReplayScenario, supportsReplayScenario, type ReplayEpisode } from './replay';
+import { marketTime, number, symbols, allSymbols, useMarketResource, type Candle, type Interval, type QuoteRow, type Ticker } from './market';
+import { matchesReplayScenario, supportsReplayScenario, type EpisodeMetadata, type ReplayEpisode } from './replay';
 import './style.css';
 import './studio.css';
 
@@ -31,6 +32,9 @@ function Terminal() {
   const [interval, setInterval] = useState<Interval>('1h');
   const [revision, setRevision] = useState(0);
   const [replayRevision, setReplayRevision] = useState(0);
+  const [episodeId, setEpisodeId] = useState('gazp-2025-05-22');
+  const [paused, setPaused] = useState(false);
+  const [speed, setSpeed] = useState('1');
   const [replayCount, setReplayCount] = useState<number | null>(null);
   const [savedProfile, setSavedProfile] = useState(readProfile);
   const [apiKey, setApiKey] = useState('');
@@ -43,13 +47,16 @@ function Terminal() {
   const config = configResource.status === 'ready' ? configResource.data : undefined;
   const quotes = useMarketResource<QuoteRow[]>('/api/quotes', revision);
   const candles = useMarketResource<Candle[]>(`/api/candles/${ticker}?interval=${interval}`, revision);
-  const replayResource = useMarketResource<ReplayEpisode>('/api/replay/gazprom', replayRevision, false);
+  const catalogResource = useMarketResource<EpisodeMetadata[]>('/api/replay/episodes', replayRevision, false);
+  const catalog = catalogResource.status === 'ready' ? catalogResource.data : [];
+  const replayResource = useMarketResource<ReplayEpisode>(`/api/replay/episodes/${episodeId}`, replayRevision, false);
   const episode = replayResource.status === 'ready' ? replayResource.data : null;
   const historical = replayCount !== null;
   const replayRunning = replayCount !== null && episode !== null && replayCount < episode.candles.length;
-  const shownTicker = historical ? 'GAZP' : ticker;
+  const metadata = episode?.metadata ?? catalog.find((item) => item.id === episodeId);
+  const shownTicker = historical && metadata ? metadata.ticker : ticker;
   const shownInterval = historical ? '1h' : interval;
-  const instrument = symbols.find((item) => item.ticker === shownTicker)!;
+  const instrument = allSymbols.find((item) => item.ticker === shownTicker)!;
   const rows = quotes.status === 'ready' ? quotes.data : [];
   const selectedQuote = rows.find((row) => row.ticker === ticker);
   const quoteIssue = quotes.status === 'error' ? quotes.issue : rows.find((row) => row.issue)?.issue;
@@ -58,13 +65,14 @@ function Terminal() {
     : candles.status === 'ready' ? candles.data : [];
   const lastBar = bars[bars.length - 1];
   const replayStudio = replaySettings.studio;
-  const eligible = replayStudio?.scenarios.filter((scenario) => supportsReplayScenario(scenario)
+  const eligible = replayStudio?.scenarios.filter((scenario) => supportsReplayScenario(scenario, metadata?.ticker)
     && replayStudio.settings.agents.some((agent) => agent.id === scenario.agentId));
-  const candidate = eligible?.length && episode?.frames
-    ? episode.frames.find((frame) => eligible.some((scenario) => matchesReplayScenario(scenario, frame)))
-    : episode?.event;
+  const candidate = episode?.frames?.find((frame) => eligible?.some((scenario) => matchesReplayScenario(scenario, frame)));
   const event = historical && candidate && lastBar?.time >= candidate.candleTime ? candidate : null;
-  const replayIssue = replayResource.status === 'error' ? replayResource.issue.message : null;
+  const replayIssue = replayResource.status === 'error' ? replayResource.issue.message
+    : catalogResource.status === 'error' ? catalogResource.issue.message : null;
+  const compatible = studio.scenarios.filter((scenario) => supportsReplayScenario(scenario, metadata?.ticker)
+    && studio.settings.agents.some((agent) => agent.id === scenario.agentId));
   const headerPrice = historical ? lastBar?.close : selectedQuote?.quote?.price;
   const loading = quotes.status === 'loading' || candles.status === 'loading';
 
@@ -83,10 +91,10 @@ function Terminal() {
   }, []);
 
   useEffect(() => {
-    if (!replayRunning || replayCount === null) return;
-    const timer = window.setTimeout(() => setReplayCount(replayCount + 1), 1100);
+    if (!replayRunning || replayCount === null || paused) return;
+    const timer = window.setTimeout(() => setReplayCount((count) => count === null ? null : count + 1), 1100 / Number(speed));
     return () => window.clearTimeout(timer);
-  }, [replayRunning, replayCount]);
+  }, [replayRunning, replayCount, paused, speed, episodeId]);
 
   function playReplay() {
     if (episode) {
@@ -94,8 +102,22 @@ function Terminal() {
       setReplaySettings({
         profile, apiKey: profile.provider === 'cloud' ? apiKey.trim() : '', runId: crypto.randomUUID(), studio,
       });
+      setPaused(false);
       setReplayCount(episode.warmupCount);
     } else setReplayRevision((value) => value + 1);
+  }
+
+  function selectEpisode(id: string) {
+    setReplayCount(null);
+    setPaused(false);
+    setReplaySettings({ profile: {}, apiKey: '' });
+    setEpisodeId(id);
+  }
+
+  function openStudio() {
+    setActiveScenariosOnly(true);
+    setSection('studio');
+    requestAnimationFrame(() => document.getElementById('saved-scenarios-title')?.focus());
   }
 
   function refresh() {
@@ -142,7 +164,8 @@ function Terminal() {
         <aside className="symbols" aria-labelledby="symbols-title">
           <div className="symbols-heading"><h2 id="symbols-title">Инструменты</h2><span>₽</span></div>
           <div className="symbol-list">
-            {symbols.map((symbol) => {
+            {(historical && metadata && !symbols.some((item) => item.ticker === metadata.ticker)
+              ? [...symbols, instrument] : symbols).map((symbol) => {
               const record = rows.find((row) => row.ticker === symbol.ticker);
               const quote = historical ? undefined : record?.quote;
               const price = historical && symbol.ticker === shownTicker ? headerPrice : quote?.price;
@@ -169,7 +192,7 @@ function Terminal() {
               <img className="symbol-logo" src={instrument.logo} alt="" width={50} height={50} />
               <div>
                 <h1 id="instrument-title">{(!historical && selectedQuote?.name) || instrument.name}</h1>
-                <div className="instrument-context"><strong>{shownTicker}</strong><span>{historical ? '22 мая 2025 · Московская биржа' : 'Московская биржа'}</span></div>
+                <div className="instrument-context"><strong>{shownTicker}</strong><span>{historical ? `${metadata?.date} · ${metadata?.kind === 'synthetic' ? 'Симуляция' : 'Московская биржа'}` : 'Московская биржа'}</span></div>
               </div>
             </div>
             <div className="market-price">
@@ -183,13 +206,19 @@ function Terminal() {
             </div>
           </div>
 
+          {historical && metadata?.kind === 'synthetic' && <div className="simulation-banner" role="note">
+            <strong>Симуляция</strong><span>Вымышленные цены, индекс и сообщения. Учебный инструмент DEMO.</span>
+          </div>}
+          {historical && metadata?.ticker === 'BELU' && <div className="corporate-banner" role="note">
+            <strong>Корпоративное действие</strong><span>Исходные цены без корректировки. Разрыв цены одной акции не равен убытку портфеля.</span>
+          </div>}
           <div className="chart-panel">
             <div className="chart-toolbar">
               <h2>Свечной график</h2>
               <CandleIntervalControl value={shownInterval} disabled={historical} onChange={setInterval} />
             </div>
             {lastBar ? (
-              <Chart key={historical ? 'replay:gazprom' : `${ticker}:${interval}`} candles={bars} interval={shownInterval} theme={theme} />
+              <Chart key={historical ? `replay:${episodeId}` : `${ticker}:${interval}`} candles={bars} interval={shownInterval} theme={theme} />
             ) : (
               <div className="chart-state" role="status">
                 <div className="chart-state-content">
@@ -212,15 +241,18 @@ function Terminal() {
           </div>
         </section>
 
-        <Navigator event={event} profile={replaySettings.profile} apiKey={replaySettings.apiKey} runId={replaySettings.runId}
+        <Navigator key={episodeId} event={event} profile={replaySettings.profile} apiKey={replaySettings.apiKey} runId={replaySettings.runId}
           running={replayRunning} replay={historical}
           loading={replayResource.status === 'loading'} issue={replayIssue}
-          studio={studio} replayStudio={replayStudio} onOpenStudio={() => {
-            setActiveScenariosOnly(true);
-            setSection('studio');
-            requestAnimationFrame(() => document.getElementById('saved-scenarios-title')?.focus());
-          }}
-          onPlay={playReplay} onExit={() => setReplayCount(null)} />
+          studio={studio} replayStudio={replayStudio} onOpenStudio={openStudio}
+          episodePicker={<EpisodePicker episodes={catalog} selected={episodeId} metadata={metadata}
+            compatibleCount={compatible.length} historical={historical} paused={paused} finished={historical && !replayRunning}
+            progress={episode && replayCount !== null ? replayCount - episode.warmupCount : 0}
+            total={episode ? episode.candles.length - episode.warmupCount : 0} speed={speed} issue={replayIssue}
+            onSelect={selectEpisode} onStudio={openStudio} onPause={() => setPaused((value) => !value)}
+            onStep={() => { setPaused(true); setReplayCount((count) => count === null || !episode ? count : Math.min(episode.candles.length, count + 1)); }}
+            onSpeed={setSpeed} onRetry={() => setReplayRevision((value) => value + 1)} />}
+          onPlay={playReplay} onExit={() => { setReplayCount(null); setPaused(false); }} />
       </main>
       <AgentStudio visible={section === 'studio'} studio={studio} setStudio={setStudio} analysisConfig={config}
         activeScenariosOnly={activeScenariosOnly} onActiveScenariosOnlyChange={setActiveScenariosOnly}

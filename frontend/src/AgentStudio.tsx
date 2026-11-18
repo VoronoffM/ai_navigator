@@ -7,10 +7,11 @@ import type { AnalysisConfig, Profile } from './analysis';
 import { AgentCards } from './AgentCards';
 import { symbols } from './market';
 import {
-  defaultScenarioChecks, describeTrigger, draftFrom, pilotTriggers, reportFormats, scenarioActions, scenarioChecks,
+  defaultScenarioChecks, describeTrigger, draftFrom, pilotTriggers, scenarioActions, scenarioChecks,
   scenarioNotifications, storageKey, templates, type Scenario, type ScenarioSettings,
 } from './scenarios';
-import { ScenarioAssets, ScenarioEditor } from './ScenarioEditor';
+import { ScenarioAssets } from './ScenarioAssets';
+import { ScenarioEditor } from './ScenarioEditor';
 import {
   activeStudioScenarios, readStudioScenarios, readStudioSettings, studioSettingsKey,
   type ExtraIntegration, type StudioAgent, type StudioSettings, type StudioState,
@@ -216,7 +217,10 @@ export function AgentStudio(props: Props) {
     const editingId = overlay.kind === 'scenario-edit' ? overlay.id : undefined;
     const existing = scenarios.find((item) => item.id === editingId);
     modalTitle = existing ? 'Редактирование сценария' : 'Новый сценарий';
-    modalContent = <ScenarioEditor key={editingId} initial={existing ?? draftFrom()} agents={agents}
+    modalContent = <ScenarioEditor key={editingId} initial={existing ?? draftFrom()} agents={agents} isNew={!existing}
+      onSaveIntegration={(integration) => persistSettings((settings) => ({
+        ...settings, integrations: [...settings.integrations, integration],
+      }))}
       onSave={(settings) => {
         if (!existing) saveScenario(settings);
         else if (persistScenarios((items) => items.map((item) => item.id === existing.id
@@ -464,7 +468,10 @@ function TemplateScenario({ initial, description, agents, telegramConnected, onS
       setError('Выберите хотя бы один актив.');
       return;
     }
-    onSave({ ...initial, assets, notification, agentId: agentId || undefined });
+    onSave({ ...initial, assets, notification, workflowVersion: 2,
+      actions: notification === 'none' ? (initial.actions ?? ['mcp']).filter((action) => action !== 'report')
+        : [...(initial.actions ?? ['mcp']).filter((action) => action !== 'report'), 'report'],
+      agentId: agentId || undefined });
   }
 
   return (
@@ -556,12 +563,14 @@ function ScenarioDetails({ scenario, agentOptions, onAgentChange, integrations, 
           {actions.map((action) => (
             <li key={action}>
               <strong>{scenarioActions[action]}</strong>
+              {action === 'report' && <span> — {scenarioNotifications[scenario.notification]}</span>}
+              {action === 'source' && <span> — {scenario.sources?.map((source) => source.kind === 'cbr' ? 'Банк России' : source.url).join(', ')}</span>}
               {action === 'mcp' && (
                 <span> — сбор рыночных данных ({checks.join(', ') || 'инструменты не выбраны'})</span>
               )}
             </li>
           ))}
-          <li><strong>AI-отчёт</strong><span> — {reportFormats[scenario.depth].toLowerCase()}</span></li>
+
         </ol>
         {!scenario.actions && sources.length > 0 && (
           <p className="studio-scenario-sources"><strong>Другие интеграции</strong> {sources.join(', ')}</p>

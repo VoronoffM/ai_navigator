@@ -8,9 +8,10 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel
 
 from backend.invest_mcp import InvestMCP
-from backend.replay import HOUR, MOSCOW, Signal, benchmark_comparison, gazprom_data
+from backend.replay import HOUR, MOSCOW, NEWS, Signal, benchmark_comparison, gazprom_data
 
 CheckName = Literal["news", "market", "dividends", "reports"]
+InformationKind = Literal["fact", "ai_analysis", "opinion", "unverified"]
 CHECKS: dict[CheckName, str] = {
     "news": "Новости",
     "market": "IMOEX",
@@ -27,6 +28,7 @@ class Material(BaseModel):
     title: str
     text: str | None = None
     url: str | None = None
+    kind: Literal["fact", "opinion", "unverified"] = "unverified"
 
     @property
     def headline_only(self) -> bool:
@@ -126,6 +128,7 @@ def dividend_result(event: Signal, rows: list[dict]) -> CheckResult:
                 fact["possibleDividendGap"] = {"gap": float(gap), "referenceClose": float(close)}
         material = Material(
             id=f"mcp-dividend-{event.ticker}-{declared_day}-{buy_day}", source="T-Invest MCP",
+            kind="fact",
             publishedAt=max(declared, created), title=f"Дивидендная запись {event.ticker}",
             text=f"Объявлено {declared_day}. Выплата {amount} {currency} на акцию. Последний день покупки {buy_day}.",
         )
@@ -155,32 +158,66 @@ def report_result(event: Signal, rows: list[dict], publications: list[Material] 
 
 
 class ReplayChecks:
-    def __init__(self, news: dict | None):
+    def __init__(self, news: dict | None = None, *, episode_id: str | None = None):
         self.article = Material.model_validate(news) if news else None
-        self.data = gazprom_data()
+        self.episode_id = episode_id
+        if episode_id:
+            from backend.episodes import episode_data
+            self.data = episode_data(episode_id)
+        else:
+            self.data = gazprom_data()
+
+    def materials(self, event: Signal, check: str) -> list[Material]:
+        if self.episode_id:
+            from backend.episodes import visible_materials
+            return [Material.model_validate(item) for item in visible_materials(
+                self.episode_id, event.detectedAt.timestamp(), check)]
+        return [self.article] if self.article and event.intervalStart <= self.article.publishedAt <= event.detectedAt else []
 
     async def news(self, event: Signal) -> CheckResult:
-        if self.article and event.intervalStart <= self.article.publishedAt <= event.detectedAt:
-            return CheckResult("ok", materials=[self.article])
-        return CheckResult("empty", "В проверенной ленте подходящих новостей не найдено.")
+        if self.data.get("newsUnavailable"):
+            return CheckResult("unavailable", "Учебная новостная лента недоступна. Отсутствие новостей проверить нельзя.")
+        materials = self.materials(event, "news")
+        if materials:
+            return CheckResult("ok", materials=materials)
+        return CheckResult("empty", "В сохранённой ленте эпизода подходящих новостей к этому моменту нет. Это не доказывает отсутствие причины.")
 
     async def market(self, event: Signal) -> CheckResult:
-        return market_result(event, self.data["IMOEX"])
+        if event.comparisonKind == "session-gap":
+            return CheckResult("empty", "Разрыв между торговыми сессиями: часовое изменение индекса не сопоставимо с изменением акции за весь перерыв.")
+        result = market_result(event, self.data["IMOEX"])
+        if comparison := result.facts.get("comparison"):
+            comparison["source"] = event.dataSource or "T-Invest MCP"
+            if event.synthetic:
+                comparison["ticker"] = "DEMO-INDEX"
+        return result
 
     async def dividends(self, event: Signal) -> CheckResult:
         result = dividend_result(event, self.data.get("dividends", []))
-        if self.article and self.article.publishedAt <= event.detectedAt:
+        if self.episode_id:
+            materials = self.materials(event, "dividends")
+            recommendation = self.data.get("recommendation")
+            recommendation_id = self.data.get("recommendationId")
+            article = next((item for item in materials if item.id == recommendation_id), None)
+        else:
+            article = self.article if self.article and self.article.id == NEWS["id"] and self.article.publishedAt <= event.detectedAt else None
+            recommendation = "Совет директоров рекомендовал не выплачивать дивиденды за 2024 год."
+        if article and recommendation:
             return CheckResult("ok", facts={
-                **result.facts,
-                "recommendation": "Совет директоров рекомендовал не выплачивать дивиденды за 2024 год.",
-                "announcedAt": self.article.publishedAt.isoformat(), "materialId": self.article.id,
-            }, materials=[self.article, *result.materials])
+                **result.facts, "recommendation": recommendation,
+                "announcedAt": article.publishedAt.isoformat(), "materialId": article.id,
+            }, materials=[article, *result.materials])
         return result
 
     async def reports(self, event: Signal) -> CheckResult:
         return report_result(event, self.data.get("reports", []), [
             Material.model_validate(item) for item in self.data.get("reportPublications", [])
         ])
+
+
+async def replay_check(name: CheckName, event: Signal) -> CheckResult:
+    # Resolve per event, never mutate shared adapters while another episode is analyzing.
+    return await getattr(ReplayChecks(episode_id=event.episodeId), name)(event)
 
 
 class LiveChecks:

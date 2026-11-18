@@ -73,7 +73,7 @@ class AnalysisTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["llm"], "ready")
         context = self.provider.calls[-1][1]
         self.assertEqual(context["report"], {"format": "detailed", "focus": "Укажи время публикации."})
-        self.assertIn("до трёх фактов", analysis_messages(context)[0]["content"])
+        self.assertIn("до трёх утверждений источников", analysis_messages(context)[0]["content"])
 
         reversed_workflow = workflow.model_copy(update={"actions": ("mcp", "cbr")})
         second = await self.finish(self.service.start(self.event, Profile(checks={"news"}, workflow=reversed_workflow)))
@@ -96,6 +96,7 @@ class AnalysisTests(unittest.IsolatedAsyncioTestCase):
             result = await check_cbr_calendar(client, self.event)
         self.assertEqual(result.status, "ok")
         self.assertEqual(len(result.materials), 1)
+        self.assertEqual(result.materials[0].kind, "fact")
         self.assertEqual(requests, [CALENDAR, "https://www.cbr.ru/press/pr/?file=22052025_153000key.htm"])
 
     async def test_canonical_context_deduplication_and_profile(self):
@@ -290,3 +291,34 @@ class AnalysisTests(unittest.IsolatedAsyncioTestCase):
         body.update(facts=[], hypotheses=[statement])
         with self.assertRaises(ValueError):
             resolve_citations(json.dumps(body), materials)
+
+    def test_statement_kind_preserves_source_provenance(self):
+        materials = {
+            item.id: item for item in (
+                Material.model_validate(gazprom_replay()["event"]["news"]),
+                Material(id="pulse", source="Пульс", kind="opinion", publishedAt=self.event.detectedAt,
+                         title="Ожидаю дальнейшего снижения", text="По-моему, падение продолжится."),
+                Material(id="unknown", source="Лента", publishedAt=self.event.detectedAt,
+                         title="Ждём роста"),
+            )
+        }
+        news = materials["interfax-1027187"]
+        body = {
+            "facts": [
+                {"text": news.title, "materialIds": [news.id]},
+                {"text": "Участник Пульса ждёт дальнейшего падения.", "materialIds": ["pulse"]},
+                {"text": materials["unknown"].title, "materialIds": ["unknown"]},
+            ],
+            "hypotheses": [
+                {"text": "Негативные ожидания могли усилить реакцию на новость.", "materialIds": [news.id, "pulse"]},
+                {"text": materials["pulse"].title, "materialIds": ["pulse"]},
+            ],
+            "questions": [],
+        }
+        result = resolve_citations(json.dumps(body), materials)
+        self.assertEqual([item["kind"] for item in result["facts"]], ["fact", "opinion", "unverified"])
+        self.assertEqual([item["kind"] for item in result["hypotheses"]], ["ai_analysis", "opinion"])
+        self.assertEqual(result["facts"][1]["citations"][0]["source"], "Пульс")
+
+        body["facts"] = [{"text": "Дивиденды отменили.", "materialIds": [news.id]}]
+        self.assertEqual(resolve_citations(json.dumps(body), materials)["facts"][0]["kind"], "unverified")

@@ -1,5 +1,5 @@
 import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { Sparkles } from 'lucide-react';
+import { Info, Sparkles } from 'lucide-react';
 import { advance, clamp, settled, spring } from './spring';
 import type { AgentPalette } from './studioSettings';
 
@@ -11,9 +11,10 @@ type AnalysisSummaryProps = {
   palette?: AgentPalette;
   activity: ReactNode;
   children: ReactNode;
+  disclaimer?: string;
 };
 
-export function AnalysisSummary({ title, summary, reason, agentName, palette, activity, children }: AnalysisSummaryProps) {
+export function AnalysisSummary({ title, summary, reason, agentName, palette, activity, children, disclaimer }: AnalysisSummaryProps) {
   const [expanded, setExpanded] = useState(false);
   const detailsId = useId();
   const card = useRef<HTMLDivElement>(null);
@@ -98,6 +99,10 @@ export function AnalysisSummary({ title, summary, reason, agentName, palette, ac
       </button>}
       {children && <div className="event-report-details" id={detailsId} hidden={!expanded}>{children}</div>}
       {activity}
+      {disclaimer && <small className="event-report-disclaimer">
+        <Info size={12} aria-hidden="true" />
+        <span>{disclaimer}</span>
+      </small>}
     </div>
   );
 }
