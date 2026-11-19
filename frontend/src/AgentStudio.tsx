@@ -5,10 +5,10 @@ import {
 } from 'lucide-react';
 import type { AnalysisConfig, Profile } from './analysis';
 import { AgentCards } from './AgentCards';
-import { symbols } from './market';
+import { allSymbols } from './market';
 import {
   defaultScenarioChecks, describeTrigger, draftFrom, pilotTriggers, scenarioActions, scenarioChecks,
-  scenarioNotifications, storageKey, templates, type Scenario, type ScenarioSettings,
+  scenarioNotifications, storageKey, templates, workflowActions, type Scenario, type ScenarioSettings,
 } from './scenarios';
 import { ScenarioAssets } from './ScenarioAssets';
 import { ScenarioEditor } from './ScenarioEditor';
@@ -234,6 +234,13 @@ export function AgentStudio(props: Props) {
     modalContent = scenario ? (
       <ScenarioDetails scenario={scenario} agentOptions={agentOptions}
         onAgentChange={(agentId) => assignScenario(scenario, agentId)}
+        onNotificationChange={(notification) => persistScenarios((items) => items.map((item) => {
+          if (item.id !== scenario.id) return item;
+          const actions = workflowActions(item);
+          return { ...item, notification, workflowVersion: 2,
+            actions: notification === 'none' ? actions.filter((action) => action !== 'report')
+              : actions.includes('report') ? actions : [...actions, 'report'] };
+        }))}
         integrations={integrations} onDelete={() => deleteScenario(scenario)}
         onEdit={() => setOverlay({ kind: 'scenario-edit', id: scenario.id })} />
     ) : <p className="studio-dialog-copy">Сценарий недоступен.</p>;
@@ -503,10 +510,11 @@ function TemplateScenario({ initial, description, agents, telegramConnected, onS
   );
 }
 
-function ScenarioDetails({ scenario, agentOptions, onAgentChange, integrations, onDelete, onEdit }: {
+function ScenarioDetails({ scenario, agentOptions, onAgentChange, onNotificationChange, integrations, onDelete, onEdit }: {
   scenario: Scenario;
   agentOptions: { value: string; label: string }[];
   onAgentChange: (agentId: string) => void;
+  onNotificationChange: (notification: ScenarioSettings['notification']) => void;
   integrations: ExtraIntegration[];
   onDelete: () => void;
   onEdit: () => void;
@@ -518,7 +526,9 @@ function ScenarioDetails({ scenario, agentOptions, onAgentChange, integrations, 
   const sources = scenario.integrationIds?.map((id) =>
     integrations.find((item) => item.id === id)?.name ?? 'Удалённая интеграция') ?? [];
   const actions = scenario.actions ?? ['mcp'];
-  const assets = scenario.assets.map((ticker) => symbols.find((symbol) => symbol.ticker === ticker)!);
+  const sourceGroups = [...new Set((scenario.sources ?? []).map((source) => source.groupId))];
+  const assets = scenario.assets.map((ticker) => allSymbols.find((symbol) => symbol.ticker === ticker)
+    ?? { ticker, name: 'Неизвестный актив', logo: '/logos/marketing.svg' });
   const signalMethod = scenario.trigger === 'price-z' ? 'Z-score с EWMA' : scenario.trigger === 'relative' ? 'Z-score' : null;
 
   function requestDelete() {
@@ -560,11 +570,12 @@ function ScenarioDetails({ scenario, agentOptions, onAgentChange, integrations, 
       <section className="studio-scenario-workflow">
         <h3>После сигнала</h3>
         <ol className="studio-scenario-flow" role="list">
-          {actions.map((action) => (
-            <li key={action}>
+          {actions.map((action, index) => (
+            <li key={`${action}-${index}`}>
               <strong>{scenarioActions[action]}</strong>
               {action === 'report' && <span> — {scenarioNotifications[scenario.notification]}</span>}
-              {action === 'source' && <span> — {scenario.sources?.map((source) => source.kind === 'cbr' ? 'Банк России' : source.url).join(', ')}</span>}
+              {action === 'source' && <span> — {scenario.sources?.filter((source) => source.groupId === sourceGroups[actions.slice(0, index).filter((item) => item === 'source').length])
+                .map((source) => source.kind === 'cbr' ? 'Банк России' : source.url).join(', ')}</span>}
               {action === 'mcp' && (
                 <span> — сбор рыночных данных ({checks.join(', ') || 'инструменты не выбраны'})</span>
               )}
@@ -592,7 +603,8 @@ function ScenarioDetails({ scenario, agentOptions, onAgentChange, integrations, 
         </div>
         <div>
           <dt>Уведомления</dt>
-          <dd>{scenarioNotifications[scenario.notification]}</dd>
+          <dd><SpringDropdown floating preserveDialogPosition label="Уведомления" options={notificationOptions}
+            value={scenario.notification} onChange={onNotificationChange} /></dd>
         </div>
       </dl>
 

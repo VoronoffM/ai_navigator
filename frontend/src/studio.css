@@ -827,12 +827,12 @@ body:has(.studio-dialog[open]) { overflow: hidden; }
 .scenario-signal-parameters {
   margin-block-start: var(--space-2);
   padding-block-start: var(--space-5);
-  border-block-start: 1px solid #e8eaed;
+  border-block-start: 1px solid var(--line);
   gap: var(--space-4);
 }
-.scenario-signal-parameters .studio-field { color: #697386; font-size: var(--text-body); }
+.scenario-signal-parameters .studio-field { color: var(--muted); font-size: var(--text-body); }
 .studio-form.scenario-signal .signal-description {
-  color: #707681;
+  color: var(--muted);
   font-size: var(--text-caption);
 }
 .new-scenario-assets .studio-field input,
@@ -1030,7 +1030,7 @@ body:has(.studio-dialog[open]) { overflow: hidden; }
 .studio-workflow-add-button { background: transparent; color: var(--accent-text); padding-inline: var(--space-2); }
 .studio-workflow-add-button:hover { background: var(--raised); }
 .studio-workflow-options { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-.studio-workflow-options button { padding-inline: var(--space-2); }
+.studio-workflow-options button { padding-inline: var(--space-2); font-size: var(--text-caption); }
 .studio-workflow :is(button, a):focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
 .event-workflow {
   display: grid;
@@ -1058,10 +1058,28 @@ body:has(.studio-dialog[open]) { overflow: hidden; }
 .studio-dialog summary { cursor: pointer; color: var(--soft); }
 
 .studio-dialog:has(.studio-editor) {
+  --scenario-control: #202731;
+  --scenario-control-ink: #f2f4f7;
+  --scenario-control-muted: #aab4c2;
+  --scenario-control-hover: #2b3441;
+  --scenario-control-border: #3b4655;
+  --scenario-control-scheme: dark;
+  --scenario-list: var(--scenario-control);
+  --scenario-selected: #332f21;
+  --scenario-selected-hover: #403a25;
+  border-color: transparent;
+}
+
+:root[data-theme='light'] .studio-dialog:has(.studio-editor) {
   --scenario-control: #f2f2f4;
   --scenario-control-ink: #353f4e;
+  --scenario-control-muted: #656d79;
   --scenario-control-hover: color-mix(in srgb, var(--scenario-control) 94%, var(--scenario-control-ink));
-  border-color: transparent;
+  --scenario-control-border: transparent;
+  --scenario-control-scheme: light;
+  --scenario-list: #fff;
+  --scenario-selected: #fff3bd;
+  --scenario-selected-hover: #ffed9a;
 }
 
 .studio-dialog:has(.studio-editor .scenario-assets) { padding-block-end: var(--space-4); }
@@ -1106,8 +1124,8 @@ body:has(.studio-dialog[open]) { overflow: hidden; }
   color: var(--scenario-control-ink);
 }
 
-.studio-editor .studio-field input { color-scheme: light; }
-.studio-editor .studio-field input::placeholder { color: var(--scenario-control-ink); }
+.studio-editor .studio-field input { color-scheme: var(--scenario-control-scheme); }
+.studio-editor .studio-field input::placeholder { color: var(--scenario-control-muted); }
 .studio-editor .signal-chevron { color: var(--scenario-control-ink); }
 
 .studio-dialog:has(.studio-editor) > header .icon-button:hover,
@@ -1116,7 +1134,7 @@ body:has(.studio-dialog[open]) { overflow: hidden; }
 }
 
 .studio-editor .signal-options {
-  background: #fff;
+  background: var(--scenario-list);
   box-shadow: 0 12px 24px rgb(0 0 0 / 18%);
 }
 
@@ -1137,37 +1155,98 @@ body:has(.studio-dialog[open]) { overflow: hidden; }
 .studio-editor .asset-results {
   border: 0;
   border-radius: var(--radius-card);
-  background: #fff;
+  background: var(--scenario-list);
   color: var(--scenario-control-ink);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 8%);
+  box-shadow: inset 0 0 0 1px var(--scenario-control-border), 0 8px 24px rgb(0 0 0 / 8%);
 }
 
 .studio-editor .asset-results li:is(:hover, [data-active='true']) {
-  background: var(--scenario-control);
+  background: var(--scenario-control-hover);
+}
+
+.studio-editor .asset-results li[aria-selected='true'] { background: var(--scenario-selected); }
+.studio-editor .asset-results li[aria-selected='true']:is(:hover, [data-active='true']) {
+  background: var(--scenario-selected-hover);
+}
+
+.studio-editor :is(.asset-command, .asset-selection button),
+.studio-editor > .studio-form :is(.studio-field input, .studio-field textarea, .signal-select) {
+  box-shadow: inset 0 0 0 1px var(--scenario-control-border);
+}
+
+.studio-editor .studio-progress-marker {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, transparent var(--step-active, 0%), var(--scenario-control-border));
 }
 
 .studio-editor :is(.asset-command-trigger, .asset-command-field > svg,
-  .asset-command-trigger > svg, .asset-command-clear, .asset-results-name span, .asset-results-exchange,
+  .asset-command-trigger > svg, .asset-command-clear,
   .studio-workflow-card .studio-field, .studio-workflow-report > header > svg) {
   color: var(--scenario-control-ink);
 }
 
-.studio-editor .asset-command-field input::placeholder { color: var(--scenario-control-ink); }
+.studio-editor .asset-command-field input::placeholder,
+.studio-editor .asset-results-name span,
+.studio-editor .asset-results-exchange {
+  color: var(--scenario-control-muted);
+}
+.studio-editor .asset-results ul { scrollbar-width: thin; scrollbar-color: var(--scenario-control-border) var(--scenario-list); }
 
 .studio-editor :is(.asset-command[data-open='false'], .asset-selection button,
   .asset-command-clear, button.asset-command-key, .studio-workflow-icon, .studio-workflow-options button):hover {
   background: var(--scenario-control-hover);
 }
 
-.studio-editor .studio-workflow-card {
+:root[data-theme='light'] .studio-editor .studio-workflow-card {
   --accent-text: #715600;
   --accent-surface: #fff3bd;
 }
 
-.studio-editor .studio-workflow-report { gap: var(--space-4); }
+.studio-editor .studio-workflow-report {
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+}
+
+.studio-editor .studio-workflow-report h5 {
+  color: var(--text);
+  font-size: var(--text-emphasis);
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.studio-editor .studio-workflow-report > .studio-field {
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: var(--space-2);
+}
+
+.studio-editor .studio-workflow-report .studio-field > svg {
+  grid-column: 1;
+  grid-row: 1;
+  place-self: center;
+  color: var(--scenario-control-muted);
+}
+
+.studio-editor .studio-workflow-report .studio-field > .signal-dropdown {
+  grid-column: 2;
+  grid-row: 1;
+}
 
 .studio-editor > .studio-form .studio-workflow-report :is(.signal-select, textarea) {
-  background: #fff;
+  background: var(--surface);
+  color: var(--text);
+  border-radius: var(--radius-control);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--scenario-control-ink) 24%, transparent);
+  font-size: var(--text-meta);
+}
+
+.studio-editor > .studio-form .studio-workflow-report .signal-select:is(:hover, [aria-expanded='true']) {
+  background: color-mix(in srgb, var(--surface) 95%, var(--scenario-control-ink));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--scenario-control-ink) 42%, transparent);
+}
+
+.studio-editor .studio-workflow-report .studio-source-help {
+  color: var(--scenario-control-muted);
+  font-size: var(--text-caption);
+  line-height: 1.5;
 }
 
 .studio-editor .studio-workflow-card .watch-chip {
@@ -1431,12 +1510,12 @@ body:has(.studio-dialog[open]) { overflow: hidden; }
 .studio-source-tooltip { position: fixed; inset: auto; margin: 0; box-sizing: border-box; width: 300px; max-width: calc(100dvw - 24px); max-height: calc(100dvh - 24px); overflow: auto; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); color: var(--text); box-shadow: 0 6px 24px rgb(0 0 0 / 16%); font: inherit; font-size: .8rem; line-height: 1.5; }
 .studio-workflow-section button:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
 
-/* A quiet canvas keeps sources and their tasks distinct from action controls. */
+/* Research uses the same background as the other action cards. */
 .studio-editor .studio-workflow-card.studio-research-card {
   --accent-text: #2ecc71;
-  background: #fff;
+  background: var(--scenario-control);
   padding: 10px var(--space-3);
-  box-shadow: inset 0 0 0 1px #ececef;
+  box-shadow: inset 0 0 0 1px var(--scenario-control-border);
   gap: 6px;
 }
 .studio-editor .studio-research-card > header .studio-workflow-icon { background: transparent; border: 0; }
@@ -1446,16 +1525,27 @@ body:has(.studio-dialog[open]) { overflow: hidden; }
 .studio-research-section h6 { margin: 0; color: var(--scenario-control-ink); font-size: var(--text-meta); font-weight: 600; line-height: 1.5; }
 .studio-research-sources { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
 .studio-research-source { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: 8px; border-radius: var(--radius-control); background: var(--scenario-control); }
-.studio-research-symbol { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: var(--radius-control); background: var(--scenario-control); color: #6c7380; }
+.studio-research-symbol { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: var(--radius-control); background: var(--scenario-control); color: var(--scenario-control-muted); }
 .studio-research-source-content { display: grid; flex: 1; gap: 2px; min-width: 0; }
 .studio-research-source-content > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-body); line-height: 1.5; font-weight: 500; }
-.studio-research-description { display: flex; align-items: center; min-height: 40px; color: #6c7380; font-size: var(--text-caption); line-height: 1.5; overflow-wrap: anywhere; }
+.studio-research-description { display: flex; align-items: center; min-height: 40px; color: var(--scenario-control-muted); font-size: var(--text-caption); line-height: 1.5; overflow-wrap: anywhere; }
 .studio-research-url { position: relative; }
-.studio-research-url > svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #6c7380; pointer-events: none; }
+.studio-research-url > svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--scenario-control-muted); pointer-events: none; }
 .studio-editor > .studio-form .studio-research-url input { min-width: 0; min-height: 40px; padding-left: 36px; border-radius: var(--radius-control); font-size: var(--text-body); font-weight: 400; text-overflow: ellipsis; }
 .studio-editor .studio-research-card .studio-field :is(input, textarea)::placeholder { color: #707681; opacity: 1; }
 .studio-editor .studio-research-card .studio-field :is(input, textarea):hover { background: var(--scenario-control-hover); }
 .studio-editor .studio-research-card .studio-field :is(input, textarea):focus-visible { background: var(--scenario-control); outline: 2px solid #2ecc71; outline-offset: 2px; }
+.studio-editor > .studio-form .studio-research-card .studio-field :is(input, textarea) {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--scenario-control-ink) 24%, transparent);
+}
+.studio-editor > .studio-form .studio-research-card .studio-field :is(input, textarea):hover {
+  background: color-mix(in srgb, var(--surface) 95%, var(--scenario-control-ink));
+}
+.studio-editor > .studio-form .studio-research-card .studio-field :is(input, textarea):focus-visible {
+  background: var(--surface);
+}
 .studio-editor .studio-research-remove { flex: none; background: transparent; color: #707681; }
 .studio-editor .studio-research-remove:hover { color: #a12c46; }
 /* Both source controls stay beside the heading, independent of popover state. */
@@ -1464,20 +1554,20 @@ body:has(.studio-dialog[open]) { overflow: hidden; }
 .studio-research-link:hover, .studio-research-catalog-trigger:hover { background: var(--scenario-control-hover); }
 .studio-research-catalog-trigger[aria-expanded='true'] { color: var(--scenario-control-ink); box-shadow: inset 0 -2px #2ecc71; }
 .studio-research-catalog { min-width: 0; }
-.studio-research-catalog-popover { position: fixed; inset: auto; margin: 0; box-sizing: border-box; width: 340px; max-width: calc(100dvw - 24px); overflow: auto; padding: 4px; border: 0; border-radius: var(--radius-control); background: #fff; color: var(--scenario-control-ink); box-shadow: 0 4px 16px rgb(0 0 0 / 10%); font: inherit; }
+.studio-research-catalog-popover { position: fixed; inset: auto; margin: 0; box-sizing: border-box; width: 340px; max-width: calc(100dvw - 24px); overflow: auto; padding: 4px; border: 0; border-radius: var(--radius-control); background: var(--scenario-list); color: var(--scenario-control-ink); box-shadow: 0 4px 16px rgb(0 0 0 / 10%); font: inherit; }
 .studio-research-catalog-option { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: 56px; padding: var(--space-2); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--scenario-control-ink); font: inherit; text-align: left; cursor: pointer; }
 .studio-research-catalog-option > span { display: grid; flex: 1; min-width: 0; gap: 2px; }
 .studio-research-catalog-option strong { font-size: var(--text-body); font-weight: 500; }
-.studio-research-catalog-option small { color: #656d79; font-size: var(--text-caption); overflow-wrap: anywhere; }
+.studio-research-catalog-option small { color: var(--scenario-control-muted); font-size: var(--text-caption); overflow-wrap: anywhere; }
 .studio-research-catalog-option:hover { background: var(--scenario-control); }
 .studio-research-catalog-option:focus-visible { outline: 2px solid #2ecc71; outline-offset: -2px; }
-.studio-research-task { border-top: 1px solid #ececef; padding-top: var(--space-2); }
+.studio-research-task { padding-top: var(--space-2); }
 .studio-editor > .studio-form .studio-research-task textarea { min-height: 64px; padding: var(--space-2) var(--space-3); border-radius: var(--radius-control); font: inherit; font-size: var(--text-body); font-weight: 400; line-height: 1.5; }
-.studio-research-task-source { color: #656d79; font-size: var(--text-caption); overflow-wrap: anywhere; }
-.studio-research-empty { margin: 0; color: #656d79; font-size: var(--text-meta); line-height: 1.5; }
+.studio-research-task-source { color: var(--scenario-control-muted); font-size: var(--text-caption); overflow-wrap: anywhere; }
+.studio-research-empty { margin: 0; color: var(--scenario-control-muted); font-size: var(--text-meta); line-height: 1.5; }
 .studio-research-card :is(button, summary):focus-visible { outline: 2px solid #2ecc71; outline-offset: 2px; }
 
-.studio-research-section-heading { display: flex; flex-wrap: nowrap; align-items: center; justify-content: space-between; gap: var(--space-1) var(--space-2); }
+.studio-research-section-heading { display: flex; flex-wrap: nowrap; align-items: center; justify-content: flex-start; gap: var(--space-1) var(--space-2); }
 .studio-editor .studio-research-edit { flex: none; background: transparent; color: #707681; }
 @media (max-width: 520px) {
   .studio-research-section-heading { align-items: flex-start; }

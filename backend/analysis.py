@@ -24,10 +24,16 @@ EvidenceCheck = Literal["news", "market", "dividends", "reports", "cbr"]
 
 class Workflow(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    actions: tuple[SourceAction, ...] = Field(min_length=1, max_length=4)
-    sources: list[ResearchSource] = Field(default_factory=list, max_length=5)
+    actions: tuple[SourceAction, ...] = Field(min_length=1, max_length=32)
+    sources: list[ResearchSource] = Field(default_factory=list, max_length=160)
     depth: Literal["brief", "detailed"] = "brief"
     instructions: str = Field(default="", max_length=1000)
+
+    def source_groups(self) -> list[list[ResearchSource]]:
+        groups: dict[str | None, list[ResearchSource]] = {}
+        for source in self.sources:
+            groups.setdefault(source.groupId, []).append(source)
+        return list(groups.values())
 
 
 class Profile(BaseModel):
@@ -149,8 +155,11 @@ class AnalysisService:
         names = tuple(name for name in self.checks if name in enabled)
         workflow = profile.workflow
         if workflow:
-            if len(set(workflow.actions)) != len(workflow.actions):
-                raise ValueError("Добавьте каждое действие один раз.")
+            unique_actions = [action for action in workflow.actions if action != "source"]
+            if len(set(unique_actions)) != len(unique_actions):
+                raise ValueError("Только изучение источников можно добавлять несколько раз.")
+            if "source" in workflow.actions and workflow.actions.count("source") != len(workflow.source_groups()):
+                raise ValueError("Для каждого действия изучения укажите отдельную группу ссылок.")
             if "source" in workflow.actions and not workflow.sources:
                 raise ValueError("Добавьте источник для изучения.")
             if "mcp" not in workflow.actions:
@@ -256,13 +265,15 @@ class AnalysisService:
             else:
                 result["reportFormat"] = workflow.depth
                 checks = {name: CheckResult("disabled") for name in CHECKS}
+                source_groups = iter(workflow.source_groups())
+                processed_sources = []
                 for action in workflow.actions:
                     if action == "mcp":
                         checks = await self.collect(event, names, record_check)
                     elif action == "report":
                         continue  # Delivery runs after synthesis, never during collection.
                     elif action == "source":
-                        for source in workflow.sources:
+                        for source in next(source_groups):
                             try:
                                 async with asyncio.timeout(10):
                                     if archive_only:
@@ -275,11 +286,12 @@ class AnalysisService:
                             except Exception:
                                 checked = CheckResult("unavailable", "Не удалось прочитать источник.")
                             source_results.append(checked)
+                            processed_sources.append(source)
                             source_tasks.append({"url": source.url, "instructions": source.instructions,
                                                  "status": checked.status, "reason": checked.reason,
                                                  "materialIds": [item.id for item in checked.materials]})
                             result["sources"] = [{**check.payload(), "url": config.url, "instructions": config.instructions}
-                                                 for check, config in zip(source_results, workflow.sources)]
+                                                 for check, config in zip(source_results, processed_sources)]
                             self.jobs[job_id] = {**self.jobs[job_id], "sources": result["sources"]}
                     else:
                         try:

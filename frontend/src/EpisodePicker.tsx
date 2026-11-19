@@ -23,7 +23,7 @@ export function EpisodePicker({ episodes, selected, metadata, historical, paused
         <p className="episode-description">{metadata.description}</p>
         <p className="episode-origin">{metadata.date}</p>
       </details>
-      {metadata.ticker === 'BELU' && <p className="episode-hint">Для первого разрыва между сессиями подойдёт правило «Изменение цены по фиксированному порогу». Часовая Z-оценка для этого разрыва недоступна.</p>}
+      {metadata.ticker === 'BELU' && <p className="episode-hint">Часовая Z-оценка для первого разрыва между сессиями недоступна.</p>}
     </>}
     {historical && <div className="episode-playback">
       <div className="episode-progress" role="status">

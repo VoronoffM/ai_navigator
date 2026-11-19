@@ -60,3 +60,24 @@ test('missing statistical history never triggers and relative direction follows 
   assert.equal(matchesReplayScenario(rule({ trigger: 'relative', direction: 'down' }),
     event({ changePercent: 1, indexChangePercent: 3, marketZ: -3 })), true);
 });
+
+
+test('repeated source actions and their independent tasks survive saving and reading', () => {
+  const stored = [{ ...rule(), name: 'Несколько задач', actions: ['source', 'mcp', 'source', 'report'], sources: [
+    { groupId: 'first', kind: 'url', url: 'https://example.com/a', instructions: 'Общая задача' },
+    { groupId: 'first', kind: 'url', url: 'https://example.com/b', instructions: 'Общая задача' },
+    { groupId: 'second', kind: 'url', url: 'https://example.com/c', instructions: 'Другая задача' },
+  ] }];
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+    getItem: () => JSON.stringify(stored),
+  } });
+  try {
+    const [saved] = readScenarios();
+    assert.deepEqual(saved.actions, stored[0].actions);
+    assert.deepEqual(saved.sources, stored[0].sources);
+  } finally {
+    if (original) Object.defineProperty(globalThis, 'localStorage', original);
+    else Reflect.deleteProperty(globalThis, 'localStorage');
+  }
+});

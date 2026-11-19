@@ -11,6 +11,7 @@ from backend.analysis import AnalysisService, Profile, Workflow, resolve_citatio
 from backend.cbr import CALENDAR, check_cbr_calendar
 from backend.llm import PublicCloudTransport, ProviderError, analysis_messages
 from backend.replay import gazprom_replay, gazprom_signal
+from backend.sources import ResearchSource
 from backend.signal_checks import (
     CALENDAR_ONLY, CHECKS, CheckResult, LiveChecks, Material, ReplayChecks, dividend_result, report_result,
 )
@@ -79,6 +80,38 @@ class AnalysisTests(unittest.IsolatedAsyncioTestCase):
         second = await self.finish(self.service.start(self.event, Profile(checks={"news"}, workflow=reversed_workflow)))
         self.assertNotEqual(result["id"], second["id"])
         self.assertEqual(order, ["cbr", "mcp", "mcp", "cbr"])
+
+    async def test_repeated_source_actions_process_only_their_own_links_in_order(self):
+        order = []
+
+        async def check_news(event):
+            order.append("mcp")
+            return await self.replay.news(event)
+
+        async def read(source, _event):
+            order.append((source.url, source.instructions))
+            return CheckResult("empty", "Нет материала в окне сигнала.")
+
+        self.checks["news"] = check_news
+        sources = [
+            ResearchSource(groupId="first", url="https://example.com/a", instructions="Общая задача"),
+            ResearchSource(groupId="first", url="https://example.com/b", instructions="Общая задача"),
+            ResearchSource(groupId="second", url="https://example.com/c", instructions="Другая задача"),
+        ]
+        workflow = Workflow(actions=("source", "mcp", "source", "report"), sources=sources)
+        with patch("backend.analysis.check_source", read):
+            result = await self.finish(self.service.start(self.event, Profile(checks={"news"}, workflow=workflow)))
+        self.assertEqual(order, [(sources[0].url, "Общая задача"), (sources[1].url, "Общая задача"),
+                                 "mcp", (sources[2].url, "Другая задача")])
+        self.assertEqual([source["url"] for source in result["sources"]], [source.url for source in sources])
+
+    def test_legacy_sources_share_one_group(self):
+        workflow = Workflow(actions=("source",), sources=[
+            ResearchSource(url="https://example.com/a", instructions="Задача"),
+            ResearchSource(url="https://example.com/b", instructions="Задача"),
+        ])
+        self.assertEqual(len(workflow.source_groups()), 1)
+        self.assertEqual(len(workflow.source_groups()[0]), 2)
 
     async def test_cbr_calendar_filters_out_releases_after_signal(self):
         requests = []

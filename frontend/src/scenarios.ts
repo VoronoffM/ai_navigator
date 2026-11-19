@@ -10,7 +10,7 @@ export const scenarioChecks = {
 
 export const defaultScenarioChecks = Object.keys(scenarioChecks) as CheckName[];
 export const scenarioActions = { mcp: 'T-Invest MCP', cbr: 'Изучить источник · ЦБ', source: 'Изучить источник', report: 'Отправка отчета' } as const;
-export type ResearchSource = { kind: 'url' | 'cbr'; url: string; instructions: string };
+export type ResearchSource = { groupId?: string; kind: 'url' | 'cbr'; url: string; instructions: string };
 export function workflowActions(scenario: Pick<ScenarioSettings, 'actions' | 'notification' | 'workflowVersion'>): SourceAction[] {
   const actions = scenario.actions ?? ['mcp'];
   if ('workflowVersion' in scenario && scenario.workflowVersion === 2) return actions;
@@ -157,10 +157,11 @@ function isScenario(value: unknown): value is Scenario {
     && (item.depth === 'brief' || item.depth === 'detailed')
     && (item.checks === undefined || (Array.isArray(item.checks) && item.checks.every((check) => defaultScenarioChecks.includes(check))))
     && (item.actions === undefined || (Array.isArray(item.actions) && item.actions.length > 0
-      && new Set(item.actions).size === item.actions.length
+      && new Set(item.actions.filter((action) => action !== 'source')).size === item.actions.filter((action) => action !== 'source').length
       && item.actions.every((action) => Object.hasOwn(scenarioActions, action))))
-    && (item.sources === undefined || (Array.isArray(item.sources) && item.sources.length <= 5
+    && (item.sources === undefined || (Array.isArray(item.sources) && item.sources.length <= 160
       && item.sources.every((source) => source && (source.kind === 'url' || source.kind === 'cbr')
+        && (source.groupId === undefined || typeof source.groupId === 'string')
         && typeof source.url === 'string' && typeof source.instructions === 'string')))
     && (item.integrationIds === undefined || (Array.isArray(item.integrationIds) && item.integrationIds.every((id) => typeof id === 'string')))
     && typeof item.notification === 'string' && Object.hasOwn(scenarioNotifications, item.notification);
@@ -178,7 +179,8 @@ export function readScenarios(): Scenario[] {
   if (!migrated.every(isScenario)) throw new Error('Invalid scenario settings');
   return migrated.map((scenario) => ({
     ...scenario, workflowVersion: 2,
-    actions: [...new Set(workflowActions(scenario).map((action) => action === 'cbr' ? 'source' : action))],
+    actions: workflowActions(scenario).map((action) => action === 'cbr' ? 'source' : action)
+      .filter((action, index, actions) => action !== 'source' || !scenario.actions?.includes('cbr') || actions.indexOf(action) === index),
     sources: scenario.actions?.includes('cbr') ? [...(scenario.sources ?? []), {
       kind: 'cbr', url: cbrCalendarUrl,
       instructions: 'Проверь решения по ключевой ставке в окне сигнала и их возможное влияние.',

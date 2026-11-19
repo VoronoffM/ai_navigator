@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react';
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, Globe2, GripVertical, Library, Link2, Pencil, Plus, X } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, Globe2, GripVertical, Library, Link2, Plus, Send, X } from 'lucide-react';
 import { ScenarioAssets } from './ScenarioAssets';
 import {
   cbrCalendarUrl, defaultScenarioChecks, draftFrom, isPilotTrigger, pilotTriggers, scenarioActions, scenarioChecks,
@@ -32,24 +32,30 @@ const relativeDirections = [
 const notificationOptions = (Object.keys(scenarioNotifications) as ScenarioSettings['notification'][])
   .map((value) => ({ value, label: scenarioNotifications[value] }));
 
-function sourceName(url: string) {
-  try { return new URL(url).hostname.replace(/^www\./, '') || 'Своя ссылка'; }
-  catch { return 'Своя ссылка'; }
-}
-
 export function ScenarioEditor({ initial, agents, isNew, onSave, onCancel, onSaveIntegration }: {
   initial: ScenarioSettings; agents: StudioAgent[]; isNew: boolean;
   onSave: (settings: ScenarioSettings) => void; onCancel: () => void;
   onSaveIntegration: (integration: ExtraIntegration) => boolean;
 }) {
-  const [draft, setDraft] = useState(() => ({ ...initial, actions: workflowActions(initial) }));
+  const [draft, setDraft] = useState(() => {
+    const legacyTask = [...new Set((initial.sources ?? []).filter((source) => !source.groupId)
+      .map((source) => source.instructions).filter(Boolean))].join('\n');
+    return { ...initial, actions: workflowActions(initial), sources: (initial.sources ?? []).map((source) =>
+      source.groupId ? source : { ...source, groupId: 'legacy', instructions: legacyTask }) };
+  });
+  const [entries, setEntries] = useState(() => {
+    const groups = [...new Set(draft.sources.map((source) => source.groupId))];
+    let sourceIndex = 0;
+    return draft.actions.map((action) => ({ action,
+      id: action === 'source' ? groups[sourceIndex++] ?? crypto.randomUUID() : crypto.randomUUID() }));
+  });
   const agentOptions = useMemo(() => [
     { value: '', label: 'Выберите агента' },
     ...agents.map(({ id, name }) => ({ value: id, label: name })),
   ], [agents]);
   const selectedAgent = agents.find(({ id }) => id === draft.agentId)?.id ?? '';
   const [triggerOptions] = useState(() =>
-    [...new Set([...pilotTriggers, 'price' as const, initial.trigger])]
+    [...new Set([...pilotTriggers, initial.trigger])]
       .map((value) => ({ value, label: templates[value].title })),
   );
   const [step, setStep] = useState(0);
@@ -59,16 +65,16 @@ export function ScenarioEditor({ initial, agents, isNew, onSave, onCancel, onSav
   const customModelDialog = useRef<HTMLDialogElement>(null);
   const customModelAcknowledge = useRef<HTMLButtonElement>(null);
   const checks = draft.checks ?? defaultScenarioChecks;
-  const actions = draft.actions ?? ['mcp'];
-  const sources = draft.sources ?? [];
+  const actions = entries.map(({ action }) => action);
+
   const [addingIntegration, setAddingIntegration] = useState(false);
   const [integrationError, setIntegrationError] = useState('');
   const integrationDialog = useRef<HTMLDialogElement>(null);
   const integrationOpener = useRef<HTMLButtonElement>(null);
-  const [dragging, setDragging] = useState<SourceAction>();
-  const [dropTarget, setDropTarget] = useState<SourceAction>();
+  const [dragging, setDragging] = useState<string>();
+  const [dropTarget, setDropTarget] = useState<string>();
   const [showActions, setShowActions] = useState(false);
-  const availableActions = (Object.keys(scenarioActions) as SourceAction[]).filter((action) => action !== 'cbr' && !actions.includes(action));
+  const availableActions = (Object.keys(scenarioActions) as SourceAction[]).filter((action) => action !== 'cbr' && (action === 'source' ? actions.length < 32 : !actions.includes(action)));
   const pilot = isPilotTrigger(draft.trigger);
   const relative = draft.trigger === 'relative';
   const directionLabel = relative ? 'Динамика относительно IMOEX' : 'Направление цены';
@@ -106,12 +112,17 @@ export function ScenarioEditor({ initial, agents, isNew, onSave, onCancel, onSav
     requestAnimationFrame(() => integrationOpener.current?.focus());
   }
 
-  function moveAction(from: SourceAction, to: SourceAction) {
+  function moveAction(from: string, to: string) {
     if (from === to) return;
-    const reordered = [...actions];
-    reordered.splice(reordered.indexOf(from), 1);
-    reordered.splice(actions.indexOf(to), 0, from);
-    update({ actions: reordered });
+    setEntries((current) => {
+      const reordered = [...current];
+      const fromIndex = current.findIndex(({ id }) => id === from);
+      const toIndex = current.findIndex(({ id }) => id === to);
+      if (fromIndex < 0 || toIndex < 0) return current;
+      const [entry] = reordered.splice(fromIndex, 1);
+      reordered.splice(toIndex, 0, entry);
+      return reordered;
+    });
   }
 
   function endDrag() {
@@ -141,15 +152,18 @@ export function ScenarioEditor({ initial, agents, isNew, onSave, onCancel, onSav
       setError(actions.length === 0 ? 'Добавьте хотя бы одно действие.' : 'Выберите хотя бы один инструмент T-Invest MCP.');
       return;
     }
-    if (actions.includes('source') && (sources.length === 0 || sources.some((source) => {
+    const sources = entries.filter(({ action }) => action === 'source')
+      .flatMap(({ id }) => draft.sources.filter((source) => source.groupId === id));
+    if (entries.some(({ action, id }) => action === 'source' && !sources.some((source) => source.groupId === id))
+      || sources.some((source) => {
       try { const url = new URL(source.url); return url.protocol !== 'https:' || !!url.username || !!url.password || !source.instructions.trim(); }
       catch { return true; }
-    }))) {
+    })) {
       setError('Для каждого источника укажите HTTPS-ссылку и задачу агенту.');
       return;
     }
     onSave({
-      ...draft, actions, checks, workflowVersion: 2,
+      ...draft, actions, sources, checks, workflowVersion: 2,
       notification: actions.includes('report') ? (draft.notification === 'none' ? 'in-app' : draft.notification) : 'none',
       name: draft.name.trim(), keywords: draft.keywords.trim(), instructions: draft.instructions.trim(),
     });
@@ -243,25 +257,31 @@ export function ScenarioEditor({ initial, agents, isNew, onSave, onCancel, onSav
             <h4 id="workflow-actions-title">Действия</h4>
             {actions.length === 0 && <p className="studio-workflow-empty">Действий пока нет. Добавьте первое действие.</p>}
             <ol className="studio-workflow" role="list" aria-label="Порядок действий">
-              {actions.map((action, index) => {
-                const neighbor = actions[index === 0 ? 1 : index - 1];
+              {entries.map(({ action, id }, index) => {
+                const sources = draft.sources.filter((source) => source.groupId === id);
+                const task = sources[0]?.instructions ?? '';
+                function updateSources(nextSources: typeof sources) {
+                  update({ sources: [...draft.sources.filter((source) => source.groupId !== id),
+                    ...nextSources.map((source) => ({ ...source, groupId: id }))] });
+                }
+                const neighbor = entries[index === 0 ? 1 : index - 1]?.id;
                 const MoveIcon = index === 0 ? ArrowDown : ArrowUp;
-                return <li className={`studio-workflow-card${action === 'source' ? ' studio-research-card' : ''}`} key={action} data-drop-target={dropTarget === action}
+                return <li className={`studio-workflow-card${action === 'source' ? ' studio-research-card' : action === 'report' ? ' studio-workflow-report' : ''}`} key={id} data-drop-target={dropTarget === id}
                   onDragOver={(event) => {
-                    if (!dragging || dragging === action) return;
+                    if (!dragging || dragging === id) return;
                     event.preventDefault();
                     event.dataTransfer.dropEffect = 'move';
-                    setDropTarget(action);
+                    setDropTarget(id);
                   }}
                   onDragLeave={(event) => {
                     if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) {
-                      setDropTarget((current) => current === action ? undefined : current);
+                      setDropTarget((current) => current === id ? undefined : current);
                     }
                   }}
                   onDrop={(event) => {
                     if (!dragging) return;
                     event.preventDefault();
-                    moveAction(dragging, action);
+                    moveAction(dragging, id);
                     endDrag();
                   }}>
                   <header>
@@ -270,18 +290,21 @@ export function ScenarioEditor({ initial, agents, isNew, onSave, onCancel, onSav
                     {neighbor && <button className="studio-workflow-icon studio-workflow-handle" type="button" draggable
                       title={index === 0 ? 'Переместить ниже' : 'Переместить выше'}
                       aria-label={`${index === 0 ? 'Переместить ниже' : 'Переместить выше'}: ${scenarioActions[action]}`}
-                      onClick={() => moveAction(action, neighbor)}
+                      onClick={() => moveAction(id, neighbor)}
                       onDragStart={(event) => {
-                        event.dataTransfer.setData('text/plain', action);
+                        event.dataTransfer.setData('text/plain', id);
                         event.dataTransfer.effectAllowed = 'move';
-                        setDragging(action);
+                        setDragging(id);
                       }}
                       onDragEnd={endDrag}>
                       <GripVertical size={17} aria-hidden="true" /><MoveIcon size={13} aria-hidden="true" />
                     </button>}
                     <button className="studio-workflow-icon" type="button" title="Убрать действие"
                       aria-label={`Убрать действие: ${scenarioActions[action]}`}
-                      onClick={() => update({ actions: actions.filter((item) => item !== action) })}>
+                      onClick={() => {
+                        setEntries(entries.filter((entry) => entry.id !== id));
+                        update({ sources: draft.sources.filter((source) => source.groupId !== id) });
+                      }}>
                       <X size={16} aria-hidden="true" />
                     </button>
                   </header>
@@ -301,12 +324,11 @@ export function ScenarioEditor({ initial, agents, isNew, onSave, onCancel, onSav
                     </fieldset>
                   ) : action === 'report' ? (
                     <div className="studio-field">
-                      <span>Куда отправлять отчёт</span>
+                      <Send size={18} aria-hidden="true" />
                       <SpringDropdown floating label="Куда отправлять отчёт"
                         options={notificationOptions.filter(({ value }) => value !== 'none')}
                         value={draft.notification === 'none' ? 'in-app' : draft.notification}
                         onChange={(notification) => update({ notification })} />
-                      <p className="studio-source-help">Отчёт отправляется после завершения разбора.</p>
                     </div>
                   ) : action === 'cbr' ? (
                     <a href={cbrCalendarUrl} target="_blank" rel="noopener noreferrer">Календарь решений по ключевой ставке</a>
@@ -314,21 +336,21 @@ export function ScenarioEditor({ initial, agents, isNew, onSave, onCancel, onSav
                     <div className="studio-research">
                       <section className="studio-research-section" aria-label="Источники информации">
                         <div className="studio-research-section-heading">
-                        <h6>Источники информации</h6>
                         {sources.length < 5 && <div className="studio-research-add">
                           <button className="studio-research-link" type="button" aria-label="Добавить URL" title="Добавить URL"
-                            onClick={() => update({ sources: [...sources, { kind: 'url', url: '', instructions: '' }] })}>
+                            onClick={() => updateSources([...sources, { kind: 'url', url: '', instructions: task }])}>
                             <Plus size={15} aria-hidden="true" /> <span className="studio-research-add-label">Добавить</span> URL
                           </button>
                           <SourceCatalog>
                             <button type="button" className="studio-research-catalog-option" onClick={() => {
                               const readySource = {
                                 kind: 'cbr' as const, url: cbrCalendarUrl,
-                                instructions: 'Проверь решения по ключевой ставке в окне сигнала и их возможное влияние.',
+                                instructions: task || 'Проверь решения по ключевой ставке в окне сигнала и их возможное влияние.',
                               };
-                              const emptyIndex = sources.findIndex((source) => !source.url && !source.instructions);
-                              update({ sources: emptyIndex < 0 ? [...sources, readySource]
-                                : sources.map((item, i) => i === emptyIndex ? readySource : item) });
+                              const emptyIndex = sources.findIndex((source) => !source.url.trim());
+                              const nextSources = emptyIndex < 0 ? [...sources, readySource]
+                                : sources.map((item, i) => i === emptyIndex ? readySource : item);
+                              updateSources(nextSources.map((source) => ({ ...source, instructions: readySource.instructions })));
                             }}>
                               <Library size={18} aria-hidden="true" />
                               <span><strong>Банк России</strong><small>Календарь решений по ключевой ставке</small></span>
@@ -337,53 +359,40 @@ export function ScenarioEditor({ initial, agents, isNew, onSave, onCancel, onSav
                           </SourceCatalog>
                         </div>}
                         </div>
-                        {sources.length === 0 ? (
-                          <p className="studio-research-empty">Добавьте ссылку или выберите источник из каталога.</p>
-                        ) : <ul className="studio-research-sources" aria-label="Выбранные источники">
+                        {sources.length > 0 && <ul className="studio-research-sources" aria-label="Выбранные источники">
                           {sources.map((source, sourceIndex) => <li className="studio-research-source" key={sourceIndex}>
                             <span className="studio-research-symbol" aria-hidden="true">
-                              {source.kind === 'cbr' ? <Library size={18} /> : <Globe2 size={18} />}
+                              <Globe2 size={18} />
                             </span>
                             <div className="studio-research-source-content">
-                              <strong title={source.url}>{source.kind === 'cbr' ? 'Банк России' : sourceName(source.url)}</strong>
-                              {source.kind === 'cbr' ? <>
-                                <span className="studio-research-description">Календарь решений по ключевой ставке</span>
-                              </> : <div className="studio-research-url studio-field">
+                              <div className="studio-research-url studio-field">
                                 <Link2 size={15} aria-hidden="true" />
                                 <input type="url" required maxLength={2048} value={source.url}
                                   aria-label={`URL источника ${sourceIndex + 1}`} title={source.url}
                                   placeholder="https://example.com/article" autoComplete="url" spellCheck={false}
-                                  onChange={(event) => update({ sources: sources.map((item, i) =>
-                                    i === sourceIndex ? { ...item, kind: 'url', url: event.target.value } : item) })} />
-                              </div>}
+                                  onChange={(event) => updateSources(sources.map((item, i) =>
+                                    i === sourceIndex ? { ...item, kind: 'url', url: event.target.value } : item))} />
+                              </div>
                             </div>
-                            {source.kind === 'cbr' && <button type="button" className="studio-workflow-icon studio-research-edit"
-                              title="Изменить ссылку" aria-label={`Изменить ссылку источника ${sourceIndex + 1}`}
-                              onClick={() => update({ sources: sources.map((item, i) => i === sourceIndex
-                                ? { ...item, kind: 'url' } : item) })}><Pencil size={15} aria-hidden="true" /></button>}
                             <button type="button" className="studio-workflow-icon studio-research-remove"
                               title="Удалить источник" aria-label={`Удалить источник ${sourceIndex + 1}`}
-                              onClick={() => update({ sources: sources.filter((_, i) => i !== sourceIndex) })}>
+                              onClick={() => updateSources(sources.filter((_, i) => i !== sourceIndex))}>
                               <X size={16} aria-hidden="true" />
                             </button>
                           </li>)}
                         </ul>}
 
                       </section>
-                      <section className="studio-research-section studio-research-task" aria-label="Задача для агента">
+                      {sources.length > 0 && <section className="studio-research-section studio-research-task" aria-label="Задача для агента">
                         <h6>Задача для агента</h6>
-                        {sources.length === 0 ? <p className="studio-research-empty">Сначала выберите источник информации.</p>
-                          : sources.map((source, sourceIndex) => <label className="studio-field" key={sourceIndex}>
-                            {sources.length > 1 && <span className="studio-research-task-source">
-                              {sourceIndex + 1}. {source.kind === 'cbr' ? 'Банк России' : sourceName(source.url)}
-                            </span>}
-                            <textarea required maxLength={1000} rows={2} value={source.instructions}
-                              aria-label={`Задача для агента: источник ${sourceIndex + 1}`}
+                        <label className="studio-field">
+                            <textarea required maxLength={1000} rows={2} value={task}
+                              aria-label="Задача для агента"
                               placeholder="Например, найди заявления о ставке перед сигналом"
-                              onChange={(event) => update({ sources: sources.map((item, i) =>
-                                i === sourceIndex ? { ...item, instructions: event.target.value } : item) })} />
-                          </label>)}
-                      </section>
+                              onChange={(event) => updateSources(sources.map((source) =>
+                                ({ ...source, instructions: event.target.value })))} />
+                          </label>
+                      </section>}
                     </div>
                   )}
                 </li>;
@@ -396,8 +405,10 @@ export function ScenarioEditor({ initial, agents, isNew, onSave, onCancel, onSav
                   </button>
                   {showActions && <div className="studio-workflow-options">
                     {availableActions.map((action) => <button type="button" key={action} onClick={() => {
-                      update({ actions: [...actions, action], ...(action === 'source' && sources.length === 0
-                        ? { sources: [{ kind: 'url', url: '', instructions: '' }] } : {}) });
+                      const id = crypto.randomUUID();
+                      setEntries([...entries, { action, id }]);
+                      if (action === 'source') update({ sources: [...draft.sources,
+                        { groupId: id, kind: 'url', url: '', instructions: '' }] });
                       setShowActions(false);
                     }}>{scenarioActions[action]}</button>)}
                     <button type="button" ref={integrationOpener} aria-haspopup="dialog" onClick={() => setAddingIntegration(true)}>

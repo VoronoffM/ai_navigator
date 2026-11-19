@@ -14,6 +14,7 @@ from backend.signal_checks import CheckResult, Material
 
 class ResearchSource(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    groupId: str | None = Field(default=None, max_length=100)
     kind: Literal["url", "cbr"] = "url"
     url: str = Field(min_length=1, max_length=2048)
     instructions: str = Field(min_length=1, max_length=1000)
