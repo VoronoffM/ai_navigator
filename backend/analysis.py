@@ -301,7 +301,13 @@ class AnalysisService:
             result["checks"] = {name: check.payload() for name, check in checks.items()}
             sources = list(checks.values()) + ([cbr] if cbr else []) + source_results
             materials = {item.id: item for check in sources for item in check.materials}
-            if materials:
+            coverage = {name: {"status": check.status, "reason": check.reason}
+                        for name, check in checks.items()}
+            if cbr:
+                coverage["cbr"] = {"status": cbr.status, "reason": cbr.reason}
+            available_checks = {name for name, check in coverage.items()
+                                if check["status"] in ("ok", "empty")}
+            if materials or available_checks:
                 self.jobs[job_id] = {
                     **self.jobs[job_id], "status": "analyzing",
                     "completedChecks": {name: checks[name].status for name in names},
@@ -310,20 +316,19 @@ class AnalysisService:
                     "event": event.model_dump(mode="json", exclude_none=True),
                     "computedFacts": {name: check.facts for name, check in checks.items() if check.facts},
                     "materials": [item.payload() for item in materials.values()],
-                    "coverage": {name: {"status": check.status, "reason": check.reason}
-                                 for name, check in checks.items()},
+                    "coverage": coverage,
                 }
                 if source_tasks:
                     context["sourceTasks"] = source_tasks
                 if workflow:
                     context["report"] = {"format": workflow.depth, "focus": workflow.instructions}
-                if cbr:
-                    context["coverage"]["cbr"] = {"status": cbr.status, "reason": cbr.reason}
-                available_checks = {name for name, check in context["coverage"].items()
-                                    if check["status"] in ("ok", "empty")}
                 schema = Synthesis.model_json_schema()
                 id_field = schema["$defs"]["Statement"]["properties"]["materialIds"]["items"]
-                id_field["enum"] = list(materials)
+                if materials:
+                    id_field["enum"] = list(materials)
+                else:
+                    for group in ("facts", "hypotheses"):
+                        schema["properties"][group]["maxItems"] = 0
                 async with asyncio.timeout(LLM_TIMEOUT):
                     raw = await provider.generate(model, context, schema)
                 result["synthesis"] = resolve_citations(raw, materials, available_checks)

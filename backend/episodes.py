@@ -15,20 +15,23 @@ from backend.replay_models import replay_scores
 VERSION = "1"
 GAZP_ID = "gazp-2025-05-22"
 EPISODES = [
-    dict(id=GAZP_ID, ticker="GAZP", name="Газпром", title="GAZP · Отказ от дивидендов",
-         date="22 мая 2025", kind="historical", description="Рекомендация совета директоров не выплачивать дивиденды за 2024 год.",
+    dict(id=GAZP_ID, ticker="GAZP", name="Газпром", title="Падение без дивидендов",
+         date="22 мая 2025", kind="historical", description="Газпром (GAZP): рекомендация совета директоров не выплачивать дивиденды за 2024 год.",
          source="T-Invest MCP", note="Сохранённые часовые свечи и публикация Интерфакса. Данные открываются по историческому времени."),
-    dict(id="vtbr-2025-04-28", ticker="VTBR", name="ВТБ", title="VTBR · Дивидендный сюрприз",
-         date="28 апреля 2025", kind="historical", description="Рекомендация дивидендов на фоне резкого роста котировок.",
+    dict(id="vtbr-2025-04-28", ticker="VTBR", name="ВТБ", title="Рост на дивидендах",
+         date="28 апреля 2025", kind="historical", description="ВТБ (VTBR): рекомендация выплатить дивиденды на фоне резкого роста котировок.",
          source="Московская биржа · ISS", note="Исходные часовые цены. Раскрытие в 13:39 доступно к закрытию свечи в 14:00. Полная новостная лента не воспроизводится."),
     dict(id="belu-2024-08-22", ticker="BELU", name="НоваБев Групп", title="BELU · Дополнительные акции",
          date="22 августа 2024", kind="historical", description="Возобновление торгов после распределения дополнительных акций.",
          source="Московская биржа · ISS", note="Исходные цены без корректировки. Перерыв в торгах 16–21 августа. Аукционный час 09:00 исключён; новые акции временно недоступны для торгов. Разрыв цены не равен убытку портфеля."),
+    dict(id="spbe-2023-11-27", ticker="SPBE", name="СПБ Биржа", title="Падение на слухах о банкротстве",
+         date="27 ноября 2023", kind="historical", description="Акции СПБ Биржи резко падают после сообщений о банкротстве. Компания заявляет, что не подавала такого заявления.",
+         source="Московская биржа · ISS", note="Реальные часовые свечи SPBE и IMOEX. Сообщение о заявлении в суд — 10:13, опровержение Интерфакса — 10:38. Итоги более позднего расследования в контекст не включены."),
     dict(id="noise-calm", ticker="DEMO", name="Учебный инструмент", title="Шум · Обычные колебания",
          date="Учебная сессия", kind="synthetic", description="Небольшие изменения цены и объёма без существенных публикаций.",
          source="Симуляция", note="Вымышленные цены и индекс. Повторный запуск воспроизводит те же данные. Срабатывание зависит от правил Agent Studio."),
-    dict(id="noise-impulse", ticker="DEMO", name="Учебный инструмент", title="Шум · Импульс без новостей",
-         date="Учебная сессия", kind="synthetic", description="Краткий ценовой импульс; в учебной ленте нет подходящих сообщений.",
+    dict(id="noise-impulse", ticker="DEMO", name="Учебный инструмент", title="Падение без новостей",
+         date="Учебная сессия", kind="synthetic", description="Учебный инструмент DEMO: краткое падение цены; в учебной ленте нет подходящих сообщений.",
          source="Симуляция", note="Вымышленные цены и индекс. Отсутствие найденной новости само по себе не доказывает, что движение — шум."),
     dict(id="noise-stale", ticker="DEMO", name="Учебный инструмент", title="Шум · Старая новость",
          date="Учебная сессия", kind="synthetic", description="Ценовой импульс и новый пересказ события месячной давности.",
@@ -38,10 +41,13 @@ EPISODES = [
          source="Симуляция", note="Вымышленные данные. Недоступность источника не означает отсутствия новостей или причины движения."),
 ]
 CATALOG = {item["id"]: item for item in EPISODES}
+# Keep edge cases available to internal checks without crowding the demonstration picker.
+PUBLIC_EPISODE_IDS = (GAZP_ID, "vtbr-2025-04-28", "spbe-2023-11-27")
 
 
 def catalog():
-    return [{**item, "datasetVersion": VERSION, "interval": "1h"} for item in EPISODES]
+    return [{**CATALOG[episode_id], "datasetVersion": VERSION, "interval": "1h"}
+            for episode_id in PUBLIC_EPISODE_IDS]
 
 
 def material(id, source, time, title, text, url=None, checks=("news",), kind="fact"):
@@ -58,7 +64,7 @@ def episode_data(episode_id):
                 "start": REPLAY_START, "recommendation": NEWS["title"], "recommendationId": NEWS["id"]}
     if CATALOG[episode_id]["kind"] == "synthetic":
         return synthetic_data(episode_id)
-    tag = "vtbr" if episode_id.startswith("vtbr") else "belu"
+    tag = episode_id.split("-", 1)[0]
     raw = json.loads((Path(__file__).with_name("data") / "episodes" / f"{tag}.json").read_text())
     ticker = raw["ticker"]
     data = {ticker: raw["candles"], "IMOEX": raw["indexCandles"], "history": raw["history"], "provenance": raw["provenance"]}
@@ -69,6 +75,18 @@ def episode_data(episode_id):
             "https://www.e-disclosure.ru/portal/event.aspx?EventId=9E-C05nxQ30WwcB6uIFpXFQ-B-B", checks=("news", "dividends"))
         data.update(start=int(datetime.fromisoformat("2025-04-28T12:00:00+03:00").timestamp()),
                     materials=[article], recommendation=article["title"], recommendationId=article["id"])
+    elif tag == "spbe":
+        # Only the unchanged headline is used from the evolving 10:13 article.
+        # Do not backdate its later additions or the 2024 regulator findings.
+        headline = material("spbe-kommersant-6364432", "Коммерсантъ", "2023-11-27T10:13:00+03:00",
+            "Арбитражный суд зарегистрировал заявление о банкротстве СПБ Биржи", None,
+            "https://www.kommersant.ru/doc/6364432", kind="unverified")
+        denial = material("spbe-interfax-933355", "Интерфакс", "2023-11-27T10:38:00+03:00",
+            '"СПБ биржа" опровергла сообщение о подаче документов на банкротство',
+            "Биржа отрицает подачу заявления о собственном банкротстве и сообщает об устойчивом финансовом положении. По данным публикации, в судебной картотеке появилась запись о заявлении от 24 ноября; сведения о кредиторе не приведены.",
+            "https://www.interfax.ru/business/933355")
+        data.update(start=int(datetime.fromisoformat("2023-11-27T10:00:00+03:00").timestamp()),
+                    materials=[headline, denial])
     else:
         article = material("belu-interfax-977582", "Интерфакс", "2024-08-22T10:27:00+03:00",
             "Торги BELU возобновлены после дополнительной эмиссии; проводится дискретный аукцион",
@@ -180,10 +198,11 @@ def episode_signal(event_id):
         frame = next((item for item in replay_episode(episode_id)["frames"] if item["event_id"] == event_id), None)
         if frame is None:
             return None
+        bar = next(bar for bar in replay_episode(episode_id)["candles"] if bar["time"] == frame["candleTime"])
         return Signal(event_id=event_id, ticker=frame["ticker"], rule=frame["rule"],
             detectedAt=moscow_time(frame["detectedAt"]), intervalStart=moscow_time(frame["candleTime"]),
             intervalEnd=moscow_time(frame["detectedAt"]), previousClose=frame["previousClose"], close=frame["close"],
-            open=next(bar["open"] for bar in replay_episode(episode_id)["candles"] if bar["time"] == frame["candleTime"]),
+            open=bar["open"], high=bar["high"], low=bar["low"], volume=bar.get("volume"),
             changePercent=frame["changePercent"], episodeId=episode_id, datasetVersion=VERSION,
             dataSource=meta["source"], synthetic=meta["kind"] == "synthetic",
             comparisonKind=frame["comparisonKind"], previousCloseAt=moscow_time(frame["previousCloseAt"]),

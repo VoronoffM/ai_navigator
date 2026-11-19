@@ -98,8 +98,8 @@ export function Navigator({ event, profile, apiKey, runId, running, replay, load
         </div>
       </header>
 
-      {episodePicker}
       <ScenarioMonitor studio={studio} onOpenStudio={onOpenStudio} />
+      {episodePicker}
 
       {(event || eventStatus) && <section className="navigator-event" aria-label="Событие">
         {event ? (
@@ -140,7 +140,7 @@ export function Navigator({ event, profile, apiKey, runId, running, replay, load
         <button type="button" className={canStop || event ? 'button button-stop' : 'button button-primary'}
           disabled={!canStop && loading} onClick={canStop ? onExit : onPlay}>
           <PlayIcon size={15} aria-hidden="true" />
-          {canStop ? 'Остановить' : issue ? 'Повторить загрузку' : replay ? 'Повторить эпизод' : 'Воспроизвести эпизод'}
+          {canStop ? 'Остановить' : issue ? 'Повторить загрузку' : replay ? 'Повторить эпизод' : 'Воспроизвести'}
         </button>
       </div>
     </aside>

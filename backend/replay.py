@@ -123,6 +123,9 @@ class Signal(BaseModel):
     previousClose: float
     close: float
     open: float | None = None
+    high: float | None = None
+    low: float | None = None
+    volume: float | None = None
     sessionStart: datetime | None = None
     previousSessionDate: date | None = None
     changePercent: float

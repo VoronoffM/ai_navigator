@@ -71,8 +71,6 @@ function Terminal() {
   const event = historical && candidate && lastBar?.time >= candidate.candleTime ? candidate : null;
   const replayIssue = replayResource.status === 'error' ? replayResource.issue.message
     : catalogResource.status === 'error' ? catalogResource.issue.message : null;
-  const compatible = studio.scenarios.filter((scenario) => supportsReplayScenario(scenario, metadata?.ticker)
-    && studio.settings.agents.some((agent) => agent.id === scenario.agentId));
   const headerPrice = historical ? lastBar?.close : selectedQuote?.quote?.price;
   const loading = quotes.status === 'loading' || candles.status === 'loading';
 
@@ -246,10 +244,10 @@ function Terminal() {
           loading={replayResource.status === 'loading'} issue={replayIssue}
           studio={studio} replayStudio={replayStudio} onOpenStudio={openStudio}
           episodePicker={<EpisodePicker episodes={catalog} selected={episodeId} metadata={metadata}
-            compatibleCount={compatible.length} historical={historical} paused={paused} finished={historical && !replayRunning}
+            historical={historical} paused={paused} finished={historical && !replayRunning}
             progress={episode && replayCount !== null ? replayCount - episode.warmupCount : 0}
             total={episode ? episode.candles.length - episode.warmupCount : 0} speed={speed} issue={replayIssue}
-            onSelect={selectEpisode} onStudio={openStudio} onPause={() => setPaused((value) => !value)}
+            onSelect={selectEpisode} onPause={() => setPaused((value) => !value)}
             onStep={() => { setPaused(true); setReplayCount((count) => count === null || !episode ? count : Math.min(episode.candles.length, count + 1)); }}
             onSpeed={setSpeed} onRetry={() => setReplayRevision((value) => value + 1)} />}
           onPlay={playReplay} onExit={() => { setReplayCount(null); setPaused(false); }} />

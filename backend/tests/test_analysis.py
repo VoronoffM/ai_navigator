@@ -119,10 +119,47 @@ class AnalysisTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(second["id"], job["id"])
         await self.finish(second)
         self.assertEqual(self.provider.calls[-1][0], "second")
+        self.provider.response = json.dumps({
+            "summary": "Индекс почти не изменился. Данных для определения причины недостаточно.",
+            "evidenceChecks": ["market"], "facts": [], "hypotheses": [], "questions": [],
+        })
         prices = await self.finish(self.service.start(self.event, Profile(checks={"market"})))
-        self.assertEqual(prices["llm"], "skipped")
+        self.assertEqual(prices["llm"], "ready")
         self.assertEqual(prices["checks"]["news"]["status"], "disabled")
-        self.assertEqual(len(self.provider.calls), 2)
+        self.assertEqual(len(self.provider.calls), 3)
+
+    async def test_empty_news_calls_model_with_check_evidence_and_no_materials(self):
+        async def empty(_event):
+            return CheckResult("empty", "Подходящих новостей не найдено.")
+
+        self.checks["news"] = empty
+        self.provider.response = json.dumps({
+            "summary": "Скорее всего, рыночный шум. В проверенной ленте причина не подтверждена.",
+            "evidenceChecks": ["news", "market"], "facts": [], "hypotheses": [], "questions": [],
+        })
+        result = await self.finish(self.service.start(self.event, Profile(checks={"news", "market"})))
+        self.assertEqual(result["llm"], "ready")
+        self.assertEqual(result["synthesis"]["evidenceChecks"], ["news", "market"])
+        context = self.provider.calls[0][1]
+        self.assertEqual(context["materials"], [])
+        self.assertEqual(context["coverage"]["news"]["status"], "empty")
+        self.assertIn("comparison", context["computedFacts"]["market"])
+
+    async def test_unavailable_news_is_preserved_in_model_context(self):
+        async def unavailable(_event):
+            return CheckResult("unavailable", "Лента недоступна.")
+
+        self.checks["news"] = unavailable
+        self.provider.response = json.dumps({
+            "summary": "Лента недоступна. Данных для определения причины недостаточно.",
+            "evidenceChecks": ["market"], "facts": [], "hypotheses": [], "questions": [],
+        })
+        result = await self.finish(self.service.start(self.event, Profile(checks={"news", "market"})))
+        self.assertEqual(result["llm"], "ready")
+        self.assertEqual(self.provider.calls[0][1]["coverage"]["news"]["status"], "unavailable")
+        skipped = await self.finish(self.service.start(self.event, Profile(checks={"news"})))
+        self.assertEqual(skipped["llm"], "skipped")
+        self.assertEqual(len(self.provider.calls), 1)
 
     async def test_summary_uses_only_available_evidence(self):
         body = {

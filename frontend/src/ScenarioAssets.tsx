@@ -2,7 +2,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { AnimatePresence, motion, useMotionValue, useReducedMotion, useSpring } from 'motion/react';
 import { Check, Layers, Search, X } from 'lucide-react';
-import { allSymbols as symbols, type Ticker } from './market';
+import { symbols, type Ticker } from './market';
 
 const pressSpring = { stiffness: 520, damping: 34, mass: 0.6 };
 const openSpring = { type: 'spring', stiffness: 300, damping: 28 } as const;
@@ -162,7 +162,7 @@ export function ScenarioAssets({ assets, onChange }: { assets: Ticker[]; onChang
                     <strong>{symbol?.ticker ?? 'Все активы'}</strong>
                     {symbol && <span>{symbol.name}</span>}
                   </span>
-                  {symbol && <span className="asset-results-exchange" title={symbol.ticker === 'DEMO' ? 'Учебный инструмент' : 'Московская биржа'}>{symbol.ticker === 'DEMO' ? 'DEMO' : 'MOEX'}</span>}
+                  {symbol && <span className="asset-results-exchange" title="Московская биржа">MOEX</span>}
                   <span className="asset-results-check" aria-hidden="true">{selected && <Check size={17} />}</span>
                 </li>
               );

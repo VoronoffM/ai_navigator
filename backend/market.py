@@ -20,6 +20,8 @@ class Ticker(StrEnum):
     SBER = "SBER"
     LKOH = "LKOH"
     ROSN = "ROSN"
+    VTBR = "VTBR"
+    SPBE = "SPBE"
 
 
 class MarketError(Exception):

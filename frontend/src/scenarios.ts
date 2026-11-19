@@ -170,8 +170,13 @@ export function readScenarios(): Scenario[] {
   const stored = localStorage.getItem(storageKey);
   if (stored === null) return [];
   const value: unknown = JSON.parse(stored);
-  if (!Array.isArray(value) || !value.every(isScenario)) throw new Error('Invalid scenario settings');
-  return value.map((scenario) => ({
+  if (!Array.isArray(value)) throw new Error('Invalid scenario settings');
+  // Preserve rules configured for the retired public DEMO episode.
+  const migrated = value.map((item) => item && typeof item === 'object' && Array.isArray(item.assets)
+    ? { ...item, assets: [...new Set(item.assets.map((asset: unknown) => asset === 'DEMO' ? 'SPBE' : asset))] }
+    : item);
+  if (!migrated.every(isScenario)) throw new Error('Invalid scenario settings');
+  return migrated.map((scenario) => ({
     ...scenario, workflowVersion: 2,
     actions: [...new Set(workflowActions(scenario).map((action) => action === 'cbr' ? 'source' : action))],
     sources: scenario.actions?.includes('cbr') ? [...(scenario.sources ?? []), {

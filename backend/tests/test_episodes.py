@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from backend.analysis import AnalysisService, Profile, Workflow
 from backend.episodes import GAZP_ID, catalog, episode_data, episode_signal, replay_episode, visible_materials
 from backend.main import app
-from backend.replay import HOUR, gazprom_replay, gazprom_signal
+from backend.replay import HOUR, MOSCOW, gazprom_replay, gazprom_signal
 from backend.replay_models import replay_scores
 from backend.signal_checks import CHECKS, ReplayChecks, replay_check
 from backend.sources import ResearchSource
@@ -19,8 +19,13 @@ class EpisodeTests(unittest.TestCase):
     def test_catalog_endpoints_and_gazp_compatibility(self):
         with TestClient(app) as client:
             items = client.get('/api/replay/episodes').json()
-            self.assertEqual(len(items), 7)
-            self.assertEqual(len({item['id'] for item in items}), 7)
+            self.assertEqual([item['id'] for item in items], [
+                GAZP_ID, 'vtbr-2025-04-28', 'spbe-2023-11-27',
+            ])
+            self.assertEqual([item['title'] for item in items], [
+                'Падение без дивидендов', 'Рост на дивидендах', 'Падение на слухах о банкротстве',
+            ])
+            self.assertEqual(items[-1]['kind'], 'historical')
             for item in items:
                 response = client.get('/api/replay/episodes/' + item['id'])
                 self.assertEqual(response.status_code, 200)
@@ -54,6 +59,27 @@ class EpisodeTests(unittest.TestCase):
         self.assertEqual(visible_materials(event.episodeId, datetime.fromisoformat('2025-04-28T13:38:59+03:00').timestamp()), [])
         self.assertEqual(len(visible_materials(event.episodeId, event.detectedAt.timestamp())), 1)
         self.assertIsNone(episode_signal(frame['event_id'].replace('-v1-', '-v2-')))
+
+    def test_spbe_real_prices_and_news_timeline(self):
+        episode_id = 'spbe-2023-11-27'
+        replay = replay_episode(episode_id)
+        event = episode_signal(replay['event']['event_id'])
+        self.assertEqual(event.detectedAt.isoformat(), '2023-11-27T11:00:00+03:00')
+        self.assertFalse(event.synthetic)
+        self.assertEqual(event.comparisonKind, 'session-gap')
+        self.assertEqual((event.previousClose, event.open, event.high, event.low, event.close),
+                         (98, 95.9, 96, 63.8, 90))
+        self.assertEqual(event.volume, 10872925)
+        self.assertAlmostEqual(event.changePercent, (90 / 98 - 1) * 100)
+        self.assertTrue(all(datetime.fromtimestamp(bar['time'], MOSCOW).hour != 9 for bar in replay['candles']))
+        at = lambda time: visible_materials(episode_id, datetime.fromisoformat('2023-11-27T' + time + '+03:00').timestamp())
+        self.assertEqual(at('10:12:59'), [])
+        self.assertEqual([item['id'] for item in at('10:13:00')], ['spbe-kommersant-6364432'])
+        self.assertEqual(len(at('10:37:59')), 1)
+        self.assertEqual([item['id'] for item in at('10:38:00')],
+                         ['spbe-kommersant-6364432', 'spbe-interfax-933355'])
+        self.assertIsNone(at('10:13:00')[0]['text'])
+        self.assertNotIn('noise-impulse', [item['id'] for item in catalog()])
 
     def test_belu_gap_preserves_raw_prices_and_omits_hourly_statistics(self):
         data = replay_episode('belu-2024-08-22')
@@ -93,6 +119,37 @@ class EpisodeTests(unittest.TestCase):
 
 
 class EpisodeAnalysisTests(unittest.IsolatedAsyncioTestCase):
+    async def test_noise_episode_gets_model_summary_without_news_materials(self):
+        captured = []
+
+        class Provider:
+            name = 'Recording provider'
+
+            async def generate(self, model, context, schema):
+                captured.append(context)
+                self_schema = schema['properties']
+                assert self_schema['facts']['maxItems'] == 0
+                assert self_schema['hypotheses']['maxItems'] == 0
+                return json.dumps({
+                    'summary': 'В учебных данных произошёл ценовой импульс. Скорее всего, рыночный шум: проверенная лента не дала объяснения, причина не подтверждена.',
+                    'evidenceChecks': ['news', 'market'],
+                    'facts': [], 'hypotheses': [], 'questions': [],
+                })
+
+        service = AnalysisService(Provider(), {name: lambda event, name=name: replay_check(name, event) for name in CHECKS})
+        try:
+            event = episode_signal(replay_episode('noise-impulse')['event']['event_id'])
+            result = await service.wait(service.start(event, Profile())['id'])
+            self.assertEqual(result['llm'], 'ready')
+            self.assertIn('Скорее всего, рыночный шум', result['synthesis']['summary'])
+            self.assertEqual(len(captured), 1)
+            self.assertEqual(captured[0]['materials'], [])
+            self.assertTrue(captured[0]['event']['synthetic'])
+            self.assertEqual(captured[0]['coverage']['news']['status'], 'empty')
+            self.assertIn('market', captured[0]['computedFacts'])
+        finally:
+            await service.shutdown()
+
     async def test_context_is_isolated_across_parallel_episodes(self):
         ids = ['vtbr-2025-04-28', 'belu-2024-08-22', 'noise-impulse', 'noise-stale', 'noise-unavailable']
         events = [episode_signal(replay_episode(key)['event']['event_id']) for key in ids]
@@ -140,7 +197,7 @@ class EpisodeAnalysisTests(unittest.IsolatedAsyncioTestCase):
                                    'hypotheses': [], 'questions': []})
         service = AnalysisService(Provider(), {name: lambda event, name=name: replay_check(name, event) for name in CHECKS})
         try:
-            for key in ['vtbr-2025-04-28', 'belu-2024-08-22', 'noise-stale']:
+            for key in ['vtbr-2025-04-28', 'belu-2024-08-22', 'noise-stale', 'spbe-2023-11-27']:
                 event = episode_signal(replay_episode(key)['event']['event_id'])
                 result = await service.wait(service.start(event, Profile())['id'])
                 self.assertEqual(result['llm'], 'ready')
@@ -151,6 +208,12 @@ class EpisodeAnalysisTests(unittest.IsolatedAsyncioTestCase):
                 for item in context['materials']:
                     self.assertLessEqual(datetime.fromisoformat(item['publishedAt']), event.detectedAt)
                 self.assertNotIn('interfax-1027187', [item['id'] for item in context['materials']])
+                if key == 'spbe-2023-11-27':
+                    self.assertEqual({item['id'] for item in context['materials']},
+                                     {'spbe-kommersant-6364432', 'spbe-interfax-933355'})
+                    self.assertEqual(context['event']['low'], 63.8)
+                    self.assertFalse(context['event']['synthetic'])
+                    self.assertNotIn('2024', json.dumps(context, ensure_ascii=False))
         finally:
             await service.shutdown()
 

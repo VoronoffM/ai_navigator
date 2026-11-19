@@ -6,12 +6,12 @@ export const symbols = [
   { ticker: 'SBER', name: 'Сбербанк', logo: '/logos/sber.png' },
   { ticker: 'LKOH', name: 'Лукойл', logo: '/logos/lkoh.png' },
   { ticker: 'ROSN', name: 'Роснефть', logo: '/logos/rosn.png' },
+  { ticker: 'VTBR', name: 'ВТБ', logo: '/logos/vtbr.svg' },
+  { ticker: 'SPBE', name: 'СПБ Биржа', logo: '/logos/spbe.svg' },
 ] as const;
 
 export const replaySymbols = [
-  { ticker: 'VTBR', name: 'ВТБ', logo: '/logos/vtbr.svg' },
   { ticker: 'BELU', name: 'НоваБев Групп', logo: '/logos/belu.svg' },
-  { ticker: 'DEMO', name: 'Учебный инструмент', logo: '/logos/demo.svg' },
 ] as const;
 export const allSymbols = [...symbols, ...replaySymbols];
 
