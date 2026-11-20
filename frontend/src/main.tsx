@@ -112,6 +112,14 @@ function Terminal() {
     setEpisodeId(id);
   }
 
+  function selectInstrument(nextTicker: Ticker) {
+    if (nextTicker === shownTicker) return;
+    setReplayCount(null);
+    setPaused(false);
+    setReplaySettings({ profile: {}, apiKey: '' });
+    setTicker(nextTicker);
+  }
+
   function openStudio() {
     setActiveScenariosOnly(true);
     setSection('studio');
@@ -169,7 +177,7 @@ function Terminal() {
               const price = historical && symbol.ticker === shownTicker ? headerPrice : quote?.price;
               return (
                 <button className="symbol" type="button" key={symbol.ticker} aria-pressed={shownTicker === symbol.ticker}
-                  title={record?.name || symbol.name} disabled={historical} onClick={() => setTicker(symbol.ticker)}>
+                  title={record?.name || symbol.name} onClick={() => selectInstrument(symbol.ticker)}>
                   <span className="symbol-name"><strong>{symbol.ticker}</strong><small>{record?.name || symbol.name}</small></span>
                   <span className="symbol-price figures" title={quote ? marketTime(quote.time) : historical ? undefined : record?.issue?.message}>
                     {price !== undefined ? number.format(price) : '—'}
@@ -239,7 +247,7 @@ function Terminal() {
           </div>
         </section>
 
-        <Navigator key={episodeId} event={event} profile={replaySettings.profile} apiKey={replaySettings.apiKey} runId={replaySettings.runId}
+        <Navigator key={episodeId} ticker={shownTicker} event={event} profile={replaySettings.profile} apiKey={replaySettings.apiKey} runId={replaySettings.runId}
           running={replayRunning} replay={historical}
           loading={replayResource.status === 'loading'} issue={replayIssue}
           studio={studio} replayStudio={replayStudio} onOpenStudio={openStudio}

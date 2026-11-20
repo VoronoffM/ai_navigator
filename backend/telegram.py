@@ -65,7 +65,7 @@ async def send_message(settings: TelegramSettings, text: str) -> None:
         raise TelegramError("Telegram не принял сообщение. Проверьте токен, чат и права бота.")
 
 
-def report_text(event: Signal, scenario: ScenarioDelivery, result: dict) -> str:
+def report_text(event: Signal, scenario: ScenarioDelivery, result: dict, *, truncate: bool = True) -> str:
     movement = f"{event.changePercent:+.2f}".replace(".", ",")
     mode = "симуляция · вымышленные данные" if event.synthetic else "исторический эпизод"
     lines = [
@@ -105,4 +105,4 @@ def report_text(event: Signal, scenario: ScenarioDelivery, result: dict) -> str:
     text = "\n".join(lines)
     # Leave room under the Telegram message limit even for astral characters.
     encoded = text.encode("utf-16-le")
-    return text if len(encoded) <= 8000 else encoded[:7998].decode("utf-16-le", errors="ignore").rstrip() + "…"
+    return text if not truncate or len(encoded) <= 8000 else encoded[:7998].decode("utf-16-le", errors="ignore").rstrip() + "…"

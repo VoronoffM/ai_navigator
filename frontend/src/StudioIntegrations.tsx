@@ -3,6 +3,7 @@ import { CalendarDays, CandlestickChart, ExternalLink, History, Newspaper, Perce
 import type { AnalysisConfig, CheckName, Profile } from './analysis';
 import { defaultScenarioChecks, scenarioChecks } from './scenarios';
 import type { ExtraIntegration } from './studioSettings';
+import { SourceInfo } from './SourceInfo';
 
 const investTools = {
   news: {
@@ -30,18 +31,14 @@ const investTools = {
 export function InvestMcpDetails() {
   return (
     <div className="studio-mcp">
-      <p className="studio-dialog-copy">Выберите в настройках сценария, какие данные агент будет проверять при разборе сигнала.</p>
+      <p className="studio-dialog-copy">Данные, доступные агентам для анализа сигналов</p>
       <ul className="studio-mcp-tools" role="list">
         {defaultScenarioChecks.map((check) => {
-          const { icon: Icon, name, description } = investTools[check];
+          const { icon: Icon } = investTools[check];
           return (
             <li key={check}>
               <span className="studio-icon"><Icon size={18} aria-hidden="true" /></span>
-              <div>
-                <h3>{scenarioChecks[check]}</h3>
-                <code>{name}</code>
-                <p>{description}</p>
-              </div>
+              <span className="studio-mcp-tool-name">{check === 'market' ? 'Свечи и индекс MOEX' : scenarioChecks[check]}</span>
             </li>
           );
         })}
@@ -49,12 +46,13 @@ export function InvestMcpDetails() {
       <div className="studio-mcp-demo">
         <History size={18} aria-hidden="true" />
         <div>
-          <h3>Демо на сохранённых данных</h3>
-          <p>Пока разбор воспроизводит заранее сохранённый эпизод с «Газпромом». Дальше агент будет запрашивать данные через T-Invest MCP.</p>
+          <h3>Демо-режим</h3>
+          <p>Используются сохранённые данные</p>
         </div>
+        <SourceInfo label="О демо-режиме" text="Разбор воспроизводит сохранённые исторические эпизоды по разным компаниям. В дальнейшем агент будет запрашивать данные через T-Invest MCP." />
       </div>
       <a className="studio-mcp-docs" href="https://developer.tbank.ru/invest/mcp" target="_blank" rel="noreferrer">
-        Документация T-Invest MCP <ExternalLink size={14} aria-hidden="true" />
+        Документация <ExternalLink size={13} aria-hidden="true" />
       </a>
     </div>
   );
@@ -73,11 +71,11 @@ export function ProviderSettings({ config, failed, provider, profile, apiKey, on
   const [draft, setDraft] = useState(profile);
   const [key, setKey] = useState(apiKey);
   const [error, setError] = useState('');
-  const [selected, setSelected] = useState(profile.provider === provider);
+  const [selected, setSelected] = useState(true);
   const api = provider === 'cloud';
 
   if (!config) return <p className="studio-dialog-copy" role="status">{failed ? 'Настройки сервера недоступны.' : 'Загружаем настройки…'}</p>;
-  if (api && !config.cloud) return <p className="studio-dialog-copy">Облачный API недоступен на сервере.</p>;
+  if (api && !config.cloud) return <p className="studio-dialog-copy">LLM API недоступен на сервере.</p>;
 
   function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -100,7 +98,7 @@ export function ProviderSettings({ config, failed, provider, profile, apiKey, on
       }
     }
     try {
-      onProfileChange({ ...draft, apiUrl, cloudModel, provider: selected ? provider : api ? 'ollama' : 'cloud' });
+      onProfileChange({ ...draft, apiUrl, cloudModel, localConfigured: api ? draft.localConfigured : selected, provider: selected ? provider : api ? 'ollama' : 'cloud' });
       if (api) onKeyChange(trimmedKey);
       onClose();
     } catch {
@@ -269,4 +267,90 @@ export function ExtraSettings({ integration, onSave, onCancel, onRemove }: {
       </div>
     </form>
   );
+}
+
+export type MailConfig = {
+  host: string; port: number; security: 'ssl' | 'starttls'; username: string; sender: string; recipient: string;
+};
+
+export function MailSettings({ connected, onConnect }: {
+  connected: MailConfig | null; onConnect: (settings: MailConfig | null) => void;
+}) {
+  const [settings, setSettings] = useState<MailConfig>(connected ?? {
+    host: '', port: 465, security: 'ssl', username: '', sender: '', recipient: '',
+  });
+  const [password, setPassword] = useState('');
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState('');
+  const [tested, setTested] = useState(false);
+  function update(patch: Partial<MailConfig>) { setSettings((current) => ({ ...current, ...patch })); setTested(false); }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPending(true); setError(''); setTested(false);
+    const normalized = { ...settings, host: settings.host.trim(), username: settings.username.trim(),
+      sender: settings.sender.trim(), recipient: settings.recipient.trim() };
+    try {
+      const response = await fetch('/api/studio/mail/test', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...normalized, password }), signal: AbortSignal.timeout(60000),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(typeof payload?.detail === 'string' ? payload.detail : 'Проверьте параметры почты.');
+      }
+      onConnect(normalized); setPassword(''); setTested(true);
+    } catch (issue) {
+      setError(issue instanceof Error ? issue.message : 'Не удалось подключить почту.');
+    } finally { setPending(false); }
+  }
+  async function disconnect() {
+    setPending(true); setError('');
+    try {
+      const response = await fetch('/api/studio/mail', { method: 'DELETE', signal: AbortSignal.timeout(12000) });
+      if (!response.ok) throw new Error();
+      onConnect(null); setPassword(''); setTested(false);
+    } catch { setError('Не удалось отключить почту. Повторите попытку.'); }
+    finally { setPending(false); }
+  }
+  return <form className="studio-form" onSubmit={submit}>
+    <p>Укажите параметры SMTP из настроек вашего почтового сервиса. Для входа используйте пароль приложения.</p>
+    <label className="studio-field">SMTP-сервер
+      <input required value={settings.host} maxLength={253} placeholder="smtp.example.ru" disabled={pending}
+        autoComplete="off" spellCheck={false} onChange={(e) => update({ host: e.target.value })} />
+    </label>
+    <label className="studio-field">Защита соединения
+      <select value={settings.security} disabled={pending} onChange={(e) => {
+        const security = e.target.value as MailConfig['security']; update({ security, port: security === 'ssl' ? 465 : 587 });
+      }}><option value="ssl">SSL/TLS</option><option value="starttls">STARTTLS</option></select>
+    </label>
+    <label className="studio-field">Порт
+      <input type="number" required min={1} max={65535} value={settings.port} disabled={pending}
+        onChange={(e) => update({ port: Number(e.target.value) })} />
+    </label>
+    <label className="studio-field">Логин SMTP
+      <input required value={settings.username} maxLength={254} placeholder="user@example.ru" disabled={pending}
+        autoComplete="off" onChange={(e) => update({ username: e.target.value })} />
+    </label>
+    <label className="studio-field">Пароль приложения
+      <input type="password" required value={password} maxLength={1024} autoComplete="new-password" disabled={pending}
+        onChange={(e) => { setPassword(e.target.value); setTested(false); }} />
+    </label>
+    <label className="studio-field">Почта отправителя
+      <input type="email" required value={settings.sender} maxLength={254} placeholder="user@example.ru" disabled={pending}
+        onChange={(e) => update({ sender: e.target.value })} />
+    </label>
+    <label className="studio-field">Почта для отчётов
+      <input type="email" required value={settings.recipient} maxLength={254} placeholder="reports@example.ru" disabled={pending}
+        onChange={(e) => update({ recipient: e.target.value })} />
+    </label>
+    <p>Кнопка отправит тестовое письмо и сохранит подключение после успешной отправки. Затем выберите «Почта» в действии «Отправка отчета». Настройки хранятся в памяти сервера до отключения или перезапуска.</p>
+    {connected && <p className="studio-feedback" role="status">Подключена почта {connected.recipient}.</p>}
+    {tested && <p className="studio-feedback" role="status">Сервер принял тестовое письмо. Проверьте входящие и папку «Спам».</p>}
+    {error && <p className="studio-error" role="alert">{error}</p>}
+    <div className="studio-actions">
+      {connected && <button className="button button-stop" type="button" disabled={pending} onClick={() => void disconnect()}>Отключить</button>}
+      <button className="button button-primary" type="submit" disabled={pending}>{pending ? 'Отправляем…' : 'Отправить тест и подключить'}</button>
+    </div>
+  </form>;
 }

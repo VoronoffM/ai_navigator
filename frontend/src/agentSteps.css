@@ -30,17 +30,18 @@
 .agent-steps ol, .agent-steps ul { margin: 0; padding: 0; list-style: none; }
 .agent-steps ul { padding-left: 20px; }
 .agent-step {
-  display: flex;
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
   position: relative;
   align-items: baseline;
-  gap: var(--space-2);
+  column-gap: var(--space-2);
   padding-block: var(--space-1);
   color: var(--text);
   font-size: var(--text-meta);
   line-height: 1.375;
 }
-.agent-step-label { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.agent-step-note { text-align: right; }
+.agent-step-label { grid-column: 2; min-width: 0; overflow-wrap: anywhere; }
+.agent-step-note { grid-column: 2; min-width: 0; text-align: left; overflow-wrap: anywhere; }
 .agent-step-box {
   align-self: flex-start;
   flex: 0 0 14px;

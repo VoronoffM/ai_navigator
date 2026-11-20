@@ -4,6 +4,7 @@ import type { ResearchSource, SourceAction } from './scenarios';
 export type CheckName = 'news' | 'market' | 'dividends' | 'reports';
 export type Profile = {
   provider?: 'ollama' | 'cloud';
+  localConfigured?: boolean;
   model?: string;
   apiUrl?: string;
   cloudModel?: string;
@@ -41,11 +42,12 @@ type CheckResult<Facts = Record<string, never>> = {
 export type Citation = Pick<Material, 'id' | 'title' | 'source' | 'url'>;
 export type Statement = { text: string; citations: Citation[]; kind?: InformationKind };
 type Job = { id: string; event_id: string };
-export type ScenarioDelivery = { run_id: string; scenario_id: string; name: string };
+export type ScenarioDelivery = { run_id: string; scenario_id: string; name: string; channel?: 'telegram' | 'mail' };
 type AnalysisActivity = {
   dataSource?: string;
   synthetic?: boolean;
   telegram?: 'pending' | 'sent' | 'failed' | 'unconnected';
+  mail?: 'pending' | 'sent' | 'failed' | 'unconnected';
   actions?: SourceAction[];
   requestedChecks?: CheckName[];
   completedChecks?: Partial<Record<CheckName, CheckStatus>>;
@@ -88,6 +90,7 @@ export function readProfile(): Profile {
     const saved = JSON.parse(localStorage.getItem(storageKey) ?? '{}');
     return {
       provider: saved?.provider === 'cloud' || saved?.provider === 'openai' ? 'cloud' : 'ollama',
+      localConfigured: saved?.localConfigured === true,
       model: typeof saved?.model === 'string' ? saved.model : undefined,
       apiUrl: typeof saved?.apiUrl === 'string' ? saved.apiUrl : undefined,
       cloudModel: typeof saved?.cloudModel === 'string' ? saved.cloudModel : undefined,
@@ -102,6 +105,7 @@ export function normalizeProfile(profile: Profile, config?: AnalysisConfig): Pro
   if (!config) return {};
   return {
     provider: profile.provider === 'cloud' && config.cloud ? 'cloud' : 'ollama',
+    localConfigured: profile.localConfigured === true,
     model: profile.model && config.models.includes(profile.model) ? profile.model : config.defaults.model,
     apiUrl: profile.apiUrl ?? config.cloud?.apiUrl,
     cloudModel: profile.cloudModel ?? config.cloud?.model,
@@ -123,7 +127,7 @@ export function useAnalysis(eventId: string | undefined, profile: Profile, apiKe
     let timer: number | undefined;
     let phase: InProgress['status'] = 'collecting';
     const deliveryQuery = telegram ? '?' + new URLSearchParams({
-      run_id: telegram.run_id, scenario_id: telegram.scenario_id,
+      run_id: telegram.run_id, scenario_id: telegram.scenario_id, channel: telegram.channel ?? 'telegram',
     }) : '';
     let completed: AnalysisResult | undefined;
 
@@ -139,13 +143,13 @@ export function useAnalysis(eventId: string | undefined, profile: Profile, apiKe
         setState({ eventId: currentEventId, profile, telegram, value: job });
         if (job.status === 'done') completed = job;
         else phase = job.status;
-        if (job.status !== 'done' || job.telegram === 'pending') {
+        if (job.status !== 'done' || job.telegram === 'pending' || job.mail === 'pending') {
           timer = window.setTimeout(() => void request(`/api/analysis/jobs/${job.id}${deliveryQuery}`), 650);
         }
       } catch (error) {
         if (!controller.signal.aborted) {
           const reason = error instanceof Error ? error.message : 'Сервер разбора недоступен.';
-          const value = completed ? { ...completed, telegram: 'failed' as const } : { status: 'error' as const, phase, reason };
+          const value = completed ? { ...completed, [telegram?.channel ?? 'telegram']: 'failed' as const } : { status: 'error' as const, phase, reason };
           setState({ eventId: currentEventId, profile, telegram, value });
         }
       }
@@ -162,7 +166,7 @@ export function useAnalysis(eventId: string | undefined, profile: Profile, apiKe
         provider: profile.provider,
         checks: profile.checks,
         workflow: profile.workflow,
-        telegram,
+        [telegram?.channel ?? 'telegram']: telegram,
         model: cloud ? profile.cloudModel : profile.model,
         apiUrl: cloud ? profile.apiUrl : undefined,
       }),

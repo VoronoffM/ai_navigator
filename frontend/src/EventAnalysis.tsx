@@ -103,9 +103,9 @@ function activitySteps(state: Exclude<AnalysisState, { status: 'error' }>): Agen
   });
   if (actions.includes('report')) steps.push({
     id: 'report', label: 'Отправка отчета',
-    status: state.telegram === 'failed' || state.telegram === 'unconnected' ? 'failed'
-      : state.telegram === 'pending' ? 'running' : finished ? 'done' : 'pending',
-    note: state.telegram === 'sent' ? 'Telegram' : state.telegram === 'unconnected' ? 'Telegram не подключён' : undefined,
+    status: (state.mail ?? state.telegram) === 'failed' || (state.mail ?? state.telegram) === 'unconnected' ? 'failed'
+      : (state.mail ?? state.telegram) === 'pending' ? 'running' : finished ? 'done' : 'pending',
+    note: (state.mail ?? state.telegram) === 'sent' ? (state.mail ? 'Почта' : 'Telegram') : (state.mail ?? state.telegram) === 'unconnected' ? (state.mail ? 'Почта не подключена' : 'Telegram не подключён') : undefined,
   });
   return steps;
 }

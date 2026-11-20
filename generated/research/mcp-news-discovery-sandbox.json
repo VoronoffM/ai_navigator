@@ -1,0 +1,128 @@
+{
+  "environment": "sandbox",
+  "serverInfo": {
+    "name": "t-invest-mcp-server",
+    "version": "1.53.0"
+  },
+  "toolCount": 68,
+  "newsTools": [
+    {
+      "name": "invest_get_news",
+      "description": "Get a paginated list of news items. Each item includes a title, full content, summary, related instrument identifiers, and a priority flag. Use instrumentId (ticker) to get news for a specific instrument. Use cursor for pagination; pass nextCursor from the response to fetch the next page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cursor": {
+            "description": "Optional. Pagination cursor. Pass nextCursor from the previous response to fetch the next page.",
+            "type": "string"
+          },
+          "instrumentId": {
+            "description": "Ticker of the instrument. If passed, the most recent news items for this instrument are returned.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Optional. Maximum number of news items to return. Default is 1000.",
+            "type": "integer"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "hasNext": {
+            "description": "Whether more news items are available beyond this page",
+            "type": "boolean"
+          },
+          "items": {
+            "description": "News items",
+            "items": {
+              "properties": {
+                "content": {
+                  "description": "Full news content",
+                  "type": "string"
+                },
+                "id": {
+                  "description": "Unique news item identifier",
+                  "type": "string"
+                },
+                "instrumentId": {
+                  "description": "Instruments mentioned in the news item",
+                  "items": {
+                    "properties": {
+                      "instrument": {
+                        "description": "Instrument reference",
+                        "properties": {
+                          "classCode": {
+                            "description": "Trading class code",
+                            "type": "string"
+                          },
+                          "instrumentUid": {
+                            "description": "Unique instrument identifier",
+                            "type": "string"
+                          },
+                          "ticker": {
+                            "description": "Instrument ticker",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "priority": {
+                  "description": "Whether this is a high-priority news item",
+                  "type": "boolean"
+                },
+                "source": {
+                  "description": "News source",
+                  "type": "string"
+                },
+                "summary": {
+                  "description": "Summarised content",
+                  "type": "string"
+                },
+                "tables": {
+                  "description": "Tabular data embedded in the news item",
+                  "items": {
+                    "properties": {
+                      "table": {
+                        "description": "Table content",
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "title": {
+                  "description": "News headline",
+                  "type": "string"
+                },
+                "ts": {
+                  "description": "News item update timestamp (ISO 8601 UTC)",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "description": "Cursor for the next page of results",
+            "type": "string"
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    }
+  ],
+  "error": null
+}

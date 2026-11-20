@@ -32,8 +32,8 @@ const relativeDirections = [
 const notificationOptions = (Object.keys(scenarioNotifications) as ScenarioSettings['notification'][])
   .map((value) => ({ value, label: scenarioNotifications[value] }));
 
-export function ScenarioEditor({ initial, agents, isNew, onSave, onCancel, onSaveIntegration }: {
-  initial: ScenarioSettings; agents: StudioAgent[]; isNew: boolean;
+export function ScenarioEditor({ initial, agents, isNew, mailConnected, telegramConnected, onSave, onCancel, onSaveIntegration }: {
+  initial: ScenarioSettings; agents: StudioAgent[]; isNew: boolean; mailConnected: boolean; telegramConnected: boolean;
   onSave: (settings: ScenarioSettings) => void; onCancel: () => void;
   onSaveIntegration: (integration: ExtraIntegration) => boolean;
 }) {
@@ -164,7 +164,7 @@ export function ScenarioEditor({ initial, agents, isNew, onSave, onCancel, onSav
     }
     onSave({
       ...draft, actions, sources, checks, workflowVersion: 2,
-      notification: actions.includes('report') ? (draft.notification === 'none' ? 'in-app' : draft.notification) : 'none',
+      notification: actions.includes('report') ? (draft.notification === 'none' ? 'mail' : draft.notification) : 'none',
       name: draft.name.trim(), keywords: draft.keywords.trim(), instructions: draft.instructions.trim(),
     });
   }
@@ -327,8 +327,12 @@ export function ScenarioEditor({ initial, agents, isNew, onSave, onCancel, onSav
                       <Send size={18} aria-hidden="true" />
                       <SpringDropdown floating label="Куда отправлять отчёт"
                         options={notificationOptions.filter(({ value }) => value !== 'none')}
-                        value={draft.notification === 'none' ? 'in-app' : draft.notification}
+                        value={draft.notification === 'none' ? 'mail' : draft.notification}
                         onChange={(notification) => update({ notification })} />
+                      {(draft.notification === 'mail' || draft.notification === 'none') && !mailConnected &&
+                        <p className="studio-template-hint" role="status">Для отправки отчётов подключите почту в разделе «Интеграции».</p>}
+                      {draft.notification === 'telegram' && !telegramConnected &&
+                        <p className="studio-template-hint" role="status">Для отправки отчётов подключите Telegram в разделе «Интеграции».</p>}
                     </div>
                   ) : action === 'cbr' ? (
                     <a href={cbrCalendarUrl} target="_blank" rel="noopener noreferrer">Календарь решений по ключевой ставке</a>

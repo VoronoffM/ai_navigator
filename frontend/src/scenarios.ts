@@ -20,7 +20,7 @@ export const cbrCalendarUrl = 'https://www.cbr.ru/dkp/cal_mp/';
 export const reportFormats = { brief: 'Краткая сводка', detailed: 'Подробный разбор' } as const;
 export type SourceAction = keyof typeof scenarioActions;
 export const scenarioNotifications = {
-  'in-app': 'В AI Штурман',
+  'mail': 'Почта',
   telegram: 'Telegram',
   none: 'Без уведомлений',
 } as const;
@@ -112,7 +112,7 @@ export function draftFrom(trigger: Trigger = 'price-z', fromTemplate = false): S
     workflowVersion: 2,
     actions: ['mcp'],
     checks: defaultScenarioChecks,
-    notification: 'in-app',
+    notification: 'mail',
   };
 }
 
@@ -174,7 +174,7 @@ export function readScenarios(): Scenario[] {
   if (!Array.isArray(value)) throw new Error('Invalid scenario settings');
   // Preserve rules configured for the retired public DEMO episode.
   const migrated = value.map((item) => item && typeof item === 'object' && Array.isArray(item.assets)
-    ? { ...item, assets: [...new Set(item.assets.map((asset: unknown) => asset === 'DEMO' ? 'SPBE' : asset))] }
+    ? { ...item, notification: item.notification === 'in-app' ? 'mail' : item.notification, assets: [...new Set(item.assets.map((asset: unknown) => asset === 'DEMO' ? 'SPBE' : asset))] }
     : item);
   if (!migrated.every(isScenario)) throw new Error('Invalid scenario settings');
   return migrated.map((scenario) => ({

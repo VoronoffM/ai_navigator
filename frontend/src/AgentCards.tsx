@@ -1,5 +1,4 @@
 import type { MouseEvent } from 'react';
-import { Plus } from 'lucide-react';
 import { BackgroundBeams } from './BackgroundBeams';
 import { agentPalette } from './studioSettings';
 
@@ -48,8 +47,19 @@ export function AgentCards({ cards, onOpen, onAdd }: {
           </div>
         )}
         <button className="studio-card studio-add-agent" type="button" aria-haspopup="dialog" onClick={onAdd}>
-          <Plus size={34} strokeWidth={1.5} aria-hidden="true" />
-          <span className="studio-card-title">Добавить агента</span>
+          <svg className="studio-add-agent-art" width="80" height="88" viewBox="0 0 80 88" fill="none" aria-hidden="true">
+            <g className="studio-add-agent-back">
+              <rect x="17" y="12" width="51" height="65" rx="9" fill="#DCE2EB" stroke="#BAC3D1" strokeWidth="1.5" transform="rotate(11 42.5 44.5)" />
+            </g>
+            <g className="studio-add-agent-front">
+              <rect x="14" y="11" width="51" height="65" rx="9" fill="#F5F6F8" stroke="#BAC3D1" strokeWidth="1.5" transform="rotate(-9 39.5 43.5)" />
+              <g className="studio-add-agent-plus">
+                <circle cx="40" cy="41" r="17" fill="#FFDD2D" />
+                <path d="M40 32V50M31 41H49" stroke="#292718" strokeWidth="2.5" strokeLinecap="round" />
+              </g>
+            </g>
+          </svg>
+          <span className="studio-card-title">Добавить<br />агента</span>
         </button>
       </div>
     </section>

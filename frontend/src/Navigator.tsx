@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Play, RotateCcw, Square } from 'lucide-react';
-import { number } from './market';
+import { number, type Ticker } from './market';
 import { EventAnalysis } from './EventAnalysis';
 import { SiriOrb } from './SiriOrb';
 import { useAnalysis, type Profile } from './analysis';
@@ -27,6 +27,7 @@ const scenarioCountLabels: Partial<Record<Intl.LDMLPluralRule, string>> = {
 };
 
 type NavigatorProps = {
+  ticker: Ticker;
   event: ReplayEvent | null;
   episodePicker: ReactNode;
   profile: Profile;
@@ -43,6 +44,13 @@ type NavigatorProps = {
   onExit: () => void;
 };
 
+const mailStatus = {
+  pending: 'Отправляем отчёт на почту…',
+  sent: 'Почтовый сервер принял отчёт к отправке.',
+  failed: 'Доставка отчёта на почту не подтверждена.',
+  unconnected: 'Подключите почту в разделе «Интеграции», чтобы получать отчёты.',
+};
+
 const telegramStatus = {
   pending: 'Отправляем отчёт в Telegram…',
   sent: 'Отчёт отправлен в Telegram.',
@@ -50,7 +58,7 @@ const telegramStatus = {
   unconnected: 'Подключите Telegram в Agent Studio, чтобы получать отчёты.',
 };
 
-export function Navigator({ event, profile, apiKey, runId, running, replay, loading, issue,
+export function Navigator({ ticker, event, profile, apiKey, runId, running, replay, loading, issue,
   studio, replayStudio, episodePicker, onOpenStudio, onPlay, onExit }: NavigatorProps) {
   const [selectedScenario, setSelectedScenario] = useState('');
   const agents = replayStudio?.settings.agents ?? [];
@@ -73,8 +81,8 @@ export function Navigator({ event, profile, apiKey, runId, running, replay, load
       workflow: { actions: scenario.actions, depth: scenario.depth, instructions: scenario.instructions, sources: scenario.sources },
     };
   }, [agent, profile, scenario]);
-  const telegram = useMemo(() => runId && matchedScenario?.notification === 'telegram' && (!matchedScenario.actions || matchedScenario.actions.includes('report'))
-    ? { run_id: runId, scenario_id: matchedScenario.id, name: matchedScenario.name }
+  const telegram = useMemo(() => runId && (matchedScenario?.notification === 'telegram' || matchedScenario?.notification === 'mail') && (!matchedScenario.actions || matchedScenario.actions.includes('report'))
+    ? { run_id: runId, scenario_id: matchedScenario.id, name: matchedScenario.name, channel: matchedScenario.notification }
     : undefined, [runId, matchedScenario]);
   const analysis = useAnalysis(event?.event_id, executionProfile, apiKey, telegram);
   const analysisPending = analysis?.status === 'collecting' || analysis?.status === 'analyzing';
@@ -98,7 +106,7 @@ export function Navigator({ event, profile, apiKey, runId, running, replay, load
         </div>
       </header>
 
-      <ScenarioMonitor studio={studio} onOpenStudio={onOpenStudio} />
+      <ScenarioMonitor studio={studio} ticker={ticker} onOpenStudio={onOpenStudio} />
       {episodePicker}
 
       {(event || eventStatus) && <section className="navigator-event" aria-label="Событие">
@@ -124,6 +132,8 @@ export function Navigator({ event, profile, apiKey, runId, running, replay, load
                 </select>
               </label>}
               {scenario && agent && analysis?.status !== 'done' && <p className="event-window">{agent.name}</p>}
+              {analysis?.status === 'done' && analysis.mail &&
+                <p className="event-window" role="status">{mailStatus[analysis.mail]}</p>}
               {analysis?.status === 'done' && analysis.telegram &&
                 <p className="event-window" role="status">{telegramStatus[analysis.telegram]}</p>}
             </header>
@@ -147,18 +157,21 @@ export function Navigator({ event, profile, apiKey, runId, running, replay, load
   );
 }
 
-function ScenarioMonitor({ studio, onOpenStudio }: {
+function ScenarioMonitor({ studio, ticker, onOpenStudio }: {
   studio: StudioState;
+  ticker: Ticker;
   onOpenStudio: () => void;
 }) {
-  const count = activeStudioScenarios(studio).length;
+  const active = activeStudioScenarios(studio);
+  const count = active.length;
+  const matchingCount = active.filter((scenario) => scenario.assets.includes(ticker)).length;
   const hasIssue = studio.issues.length > 0;
   const countLabel = scenarioCountLabels[scenarioPlural.select(count)] ?? 'активных сценариев';
 
   return (
     <section className="scenario-monitor" aria-labelledby="scenario-monitor-title">
       <h3 id="scenario-monitor-title" className="figures" aria-live="polite" aria-atomic="true">
-        {hasIssue ? 'Сценарии' : `${count} ${countLabel}`}
+        {hasIssue ? 'Сценарии' : `${count} ${countLabel} (${matchingCount} с ${ticker})`}
       </h3>
       <button className="scenario-monitor-manage" type="button" onClick={onOpenStudio}
         aria-label="Управлять сценариями в Agent Studio">Управлять</button>

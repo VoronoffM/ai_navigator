@@ -20,7 +20,7 @@ export function agentPalette(index: number): AgentPalette | undefined {
 export const studioSettingsKey = 'ai-navigator.studio.v1';
 
 export const starterAgents: StudioAgent[] = [
-  { id: 'market-watch', name: 'Рыночный радар', provider: 'ollama' },
+  { id: 'market-watch', name: 'Рыночный радар', provider: 'cloud' },
   { id: 'news-watch', name: 'Новостной аналитик', provider: 'ollama' },
   { id: 'portfolio-watch', name: 'Портфельный наблюдатель', provider: 'ollama' },
 ];
